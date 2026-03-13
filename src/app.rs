@@ -61,6 +61,9 @@ struct TerminalWindow {
     last_set_title: String,
     /// Scroll offset: 0 = live (bottom), >0 = scrolled up N lines into history.
     scroll_offset: usize,
+    /// Per-window sidebar width in physical pixels. Allows different widths
+    /// on different screens/resolutions.
+    sidebar_width: u32,
 }
 
 impl TerminalWindow {
@@ -376,6 +379,7 @@ impl App {
                 title_edit_buffer: String::new(),
                 last_set_title: String::new(),
                 scroll_offset: 0,
+                sidebar_width: self.config.sidebar_width,
             },
         ))
     }
@@ -692,7 +696,7 @@ impl App {
         };
 
         if draw_sidebar {
-            let sidebar_x = vp_w - config.sidebar_width as f32 / scale;
+            let sidebar_x = vp_w - tw.sidebar_width as f32 / scale;
             renderer.update_sidebar_uniforms(
                 sb_cols,
                 sb_rows,
@@ -757,7 +761,7 @@ impl App {
         let logical_h = phys_size.height as f32 / scale;
 
         let sidebar_logical = if sidebar.visible {
-            config.sidebar_width as f32 / scale
+            tw.sidebar_width as f32 / scale
         } else {
             0.0
         };
@@ -1480,24 +1484,22 @@ impl ApplicationHandler for App {
                 }
 
                 if self.dragging_sidebar {
-                    if let Some((_, tw)) = self.windows.get(idx) {
+                    if let Some((_, tw)) = self.windows.get_mut(idx) {
                         let size = tw.cockpit_window.window.inner_size();
                         let new_width = (size.width as f64 - position.x)
                             .max(100.0)
                             .min(size.width as f64 * 0.6) as u32;
-                        if new_width != self.config.sidebar_width {
-                            self.config.sidebar_width = new_width;
-                            // Resize all windows to reflect new sidebar width
-                            for i in 0..self.windows.len() {
-                                self.handle_resize_window(i);
-                            }
+                        if new_width != tw.sidebar_width {
+                            tw.sidebar_width = new_width;
+                            // Resize only this window
+                            self.handle_resize_window(idx);
                         }
                     }
                 } else if self.sidebar.visible {
                     if let Some((_, tw)) = self.windows.get(idx) {
                         self.cursor_hover_window = Some(idx);
                         let width = tw.cockpit_window.window.inner_size().width;
-                        let edge_x = width.saturating_sub(self.config.sidebar_width) as f64;
+                        let edge_x = width.saturating_sub(tw.sidebar_width) as f64;
                         if (position.x - edge_x).abs() < 5.0 {
                             tw.cockpit_window.window.set_cursor(CursorIcon::ColResize);
                         } else if position.x > edge_x {
@@ -1547,11 +1549,12 @@ impl ApplicationHandler for App {
                         let scale = tw.cockpit_window.window.scale_factor();
                         let cols = tw.grid_cols;
                         let rows = tw.grid_rows;
-                        (width, cell_h, cell_w, scale, cols, rows)
+                        let sb_width = tw.sidebar_width;
+                        (width, cell_h, cell_w, scale, cols, rows, sb_width)
                     });
-                    if let Some((width, cell_h, cell_w, scale, cols, rows)) = win_info {
+                    if let Some((width, cell_h, cell_w, scale, cols, rows, sb_width)) = win_info {
                         let edge_x = if self.sidebar.visible {
-                            width.saturating_sub(self.config.sidebar_width) as f64
+                            width.saturating_sub(sb_width) as f64
                         } else {
                             width as f64
                         };
