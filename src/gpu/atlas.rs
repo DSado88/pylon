@@ -643,7 +643,7 @@ impl GlyphAtlas {
         ctx.set_allows_antialiasing(true);
         ctx.set_should_antialias(true);
         ctx.set_allows_font_smoothing(true);
-        ctx.set_should_smooth_fonts(false); // no subpixel — single-channel atlas
+        ctx.set_should_smooth_fonts(true); // weight boosting for thicker, cleaner glyphs
 
         // White glyph on black background (R8Unorm = grayscale intensity)
         ctx.set_gray_fill_color(1.0, 1.0);
@@ -726,15 +726,19 @@ impl GlyphAtlas {
         let glyph_w = self.raster_width as i32;
         let glyph_h = self.raster_height as i32;
 
+        // Allocate with 1px padding on each side to prevent bilinear
+        // filtering from bleeding adjacent atlas entries.
+        let pad = 1_i32;
         let alloc = self
             .allocator
-            .allocate(etagere::size2(glyph_w, glyph_h))
+            .allocate(etagere::size2(glyph_w + pad * 2, glyph_h + pad * 2))
             .ok_or_else(|| CockpitError::Glyph("atlas full".into()))?;
 
-        let atlas_x = alloc.rectangle.min.x as u16;
-        let atlas_y = alloc.rectangle.min.y as u16;
+        // Upload glyph into the center of the padded region.
+        // The padding stays zero (black) from the initial texture clear.
+        let atlas_x = (alloc.rectangle.min.x + pad) as u16;
+        let atlas_y = (alloc.rectangle.min.y + pad) as u16;
 
-        // Rasterize and upload
         let pixels = self.rasterize_glyph(&key);
         self.upload_to_texture(&pixels, atlas_x, atlas_y, glyph_w as u16, glyph_h as u16);
 

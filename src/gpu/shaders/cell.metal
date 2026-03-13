@@ -81,7 +81,7 @@ fragment half4 cell_fragment(
     VertexOut in [[stage_in]],
     texture2d<half> atlas [[texture(0)]]
 ) {
-    constexpr sampler s(filter::nearest);
+    constexpr sampler s(filter::linear);
     half4 glyph_alpha = atlas.sample(s, in.tex_coord);
     return mix(in.bg_color, in.fg_color, glyph_alpha.r);
 }
