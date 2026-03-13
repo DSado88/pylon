@@ -158,6 +158,40 @@ struct Selection {
     end_col: usize,
 }
 
+/// Bring a window to the front and unminimize it if needed.
+fn focus_window(window: &winit::window::Window) {
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let handle = match window.window_handle() {
+        Ok(h) => h,
+        Err(_) => return,
+    };
+    let ns_view_ptr = match handle.as_raw() {
+        RawWindowHandle::AppKit(h) => h.ns_view,
+        _ => return,
+    };
+    unsafe {
+        use objc2::msg_send;
+        use objc2::runtime::AnyObject;
+
+        let ns_view: &AnyObject = &*(ns_view_ptr.as_ptr() as *const AnyObject);
+        let ns_window: *const AnyObject = msg_send![ns_view, window];
+        if ns_window.is_null() {
+            return;
+        }
+        let ns_window = &*ns_window;
+
+        // Unminimize if minimized
+        let is_mini: bool = msg_send![ns_window, isMiniaturized];
+        if is_mini {
+            let _: () = msg_send![ns_window, deminiaturize: std::ptr::null::<AnyObject>()];
+        }
+
+        // Bring to front and make key window
+        let _: () = msg_send![ns_window, makeKeyAndOrderFront: std::ptr::null::<AnyObject>()];
+    }
+}
+
 /// Convert a physical pixel position to grid (row, col), accounting for
 /// scale factor and padding.
 fn pixel_to_grid(
@@ -1564,11 +1598,22 @@ impl ApplicationHandler for App {
                                                 self.sidebar.dirty = true;
                                                 self.sidebar_version += 1;
                                             }
+                                            // Try native tab switch first (works for
+                                            // tabs in the same window group).
                                             if let Some((_, tw)) = self.windows.get(idx)
                                             {
                                                 tw.cockpit_window
                                                     .window
                                                     .select_tab_at_index(tab_idx);
+                                            }
+                                            // Also bring the target window to the
+                                            // front and unminimize if needed.
+                                            if let Some((_, target)) =
+                                                self.windows.get(tab_idx)
+                                            {
+                                                focus_window(
+                                                    &target.cockpit_window.window,
+                                                );
                                             }
                                         }
                                     }
