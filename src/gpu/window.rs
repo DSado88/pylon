@@ -28,6 +28,10 @@ impl CockpitWindow {
             _ => return Err(CockpitError::Render("expected AppKit window handle".into())),
         };
 
+        // Configure native macOS tab grouping — force tabbingMode to Preferred
+        // so windows always group as tabs regardless of system preferences.
+        Self::set_tabbing_mode_preferred(&ns_view_ptr);
+
         let raw_layer = unsafe { raw_window_metal::Layer::from_ns_view(ns_view_ptr) };
         let layer_ptr: *mut CAMetalLayer = raw_layer.into_raw().as_ptr().cast();
         let metal_layer: Retained<CAMetalLayer> = unsafe {
@@ -39,10 +43,27 @@ impl CockpitWindow {
         metal_layer.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
         metal_layer.setDisplaySyncEnabled(true);
         metal_layer.setFramebufferOnly(true);
+        metal_layer.setContentsScale(window.scale_factor());
 
         Ok(Self {
             window,
             metal_layer,
         })
+    }
+
+    /// Set NSWindow.tabbingMode = NSWindowTabbingModePreferred (1) via raw message send.
+    /// This ensures windows always tab together regardless of the user's Dock preference.
+    fn set_tabbing_mode_preferred(ns_view_ptr: &NonNull<std::ffi::c_void>) {
+        use objc2::msg_send;
+        use objc2::runtime::AnyObject;
+
+        unsafe {
+            let ns_view: &AnyObject = &*(ns_view_ptr.as_ptr() as *const AnyObject);
+            let ns_window: *const AnyObject = msg_send![ns_view, window];
+            if !ns_window.is_null() {
+                // NSWindowTabbingModePreferred = 1
+                let _: () = msg_send![&*ns_window, setTabbingMode: 1_isize];
+            }
+        }
     }
 }

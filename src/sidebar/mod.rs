@@ -1,7 +1,8 @@
-pub mod sessions;
+pub mod discovery;
+pub mod layout;
 pub mod state;
-pub mod tracker;
+pub mod usage;
 
-pub use sessions::{SessionList, SessionStatus, SessionSummary};
-pub use state::{SidebarPanel, SidebarState};
-pub use tracker::UsageTracker;
+pub use discovery::{ClaudeSession, ClaudeStatus};
+pub use state::{AccountUsage, SidebarHitEntry, SidebarPanel, SidebarState, TabSessionEntry};
+pub use usage::UsageData;

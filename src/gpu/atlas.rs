@@ -56,6 +56,7 @@ impl GlyphAtlas {
         device: &ProtocolObject<dyn MTLDevice>,
         font_family: &str,
         font_size: f32,
+        line_height_factor: f32,
     ) -> Result<Self> {
         let font = ct_new_from_name(font_family, font_size as f64)
             .map_err(|()| CockpitError::Glyph(format!("font not found: {font_family}")))?;
@@ -76,7 +77,7 @@ impl GlyphAtlas {
         let ascent = font.ascent();
         let descent = font.descent();
         let leading = font.leading();
-        let cell_height = (ascent + descent + leading).ceil();
+        let cell_height = (ascent + descent + leading).ceil() * line_height_factor as f64;
 
         // Cell width from advance of '0' (monospace representative)
         let cell_width = Self::measure_advance(&font, '0');
@@ -129,6 +130,16 @@ impl GlyphAtlas {
             let _ = atlas.get_or_insert(key);
         }
 
+        // Pre-warm bold ASCII to avoid first-use latency
+        for ch in ' '..='~' {
+            let key = GlyphKey {
+                ch,
+                bold: true,
+                italic: false,
+            };
+            let _ = atlas.get_or_insert(key);
+        }
+
         Ok(atlas)
     }
 
@@ -159,12 +170,271 @@ impl GlyphAtlas {
         }
     }
 
+    /// Draw box-drawing characters (U+2500–U+257F) as pixel-perfect geometric
+    /// primitives. Returns Some(pixels) if handled, None to fall through to
+    /// Core Text rasterization.
+    fn rasterize_box_drawing(&self, ch: char) -> Option<Vec<u8>> {
+        let code = ch as u32;
+        if !(0x2500..=0x257F).contains(&code) {
+            return None;
+        }
+
+        let w = self.raster_width;
+        let h = self.raster_height;
+        let mut pixels = vec![0u8; w * h];
+
+        let cx = w / 2; // center x
+        let cy = h / 2; // center y
+
+        // Line thickness: thin = 1px, heavy = 2-3px depending on cell size
+        let thin = 1usize.max(w / 10);
+        let heavy = (thin * 2).max(2);
+
+        // Helper closures for drawing lines
+        let mut hline = |y_start: usize, y_end: usize, x_start: usize, x_end: usize| {
+            for y in y_start..y_end.min(h) {
+                for x in x_start..x_end.min(w) {
+                    pixels[y * w + x] = 255;
+                }
+            }
+        };
+
+        // Decode the box-drawing character into segments:
+        // Each char can have: left, right, up, down segments from center
+        // with thin or heavy weight
+        let half_thin = thin / 2;
+        let half_heavy = heavy / 2;
+
+        match code {
+            // ─ light horizontal
+            0x2500 => {
+                hline(cy - half_thin, cy - half_thin + thin, 0, w);
+            }
+            // ━ heavy horizontal
+            0x2501 => {
+                hline(cy - half_heavy, cy - half_heavy + heavy, 0, w);
+            }
+            // │ light vertical
+            0x2502 => {
+                hline(0, h, cx - half_thin, cx - half_thin + thin);
+            }
+            // ┃ heavy vertical
+            0x2503 => {
+                hline(0, h, cx - half_heavy, cx - half_heavy + heavy);
+            }
+            // ╌ light triple dash horizontal (render as thin horizontal)
+            0x254C => {
+                hline(cy - half_thin, cy - half_thin + thin, 0, w);
+            }
+            // ╍ heavy triple dash horizontal
+            0x254D => {
+                hline(cy - half_heavy, cy - half_heavy + heavy, 0, w);
+            }
+            // ┌ light down and right
+            0x250C => {
+                hline(cy - half_thin, cy - half_thin + thin, cx, w); // right
+                hline(cy, h, cx - half_thin, cx - half_thin + thin); // down
+            }
+            // ┐ light down and left
+            0x2510 => {
+                hline(cy - half_thin, cy - half_thin + thin, 0, cx + half_thin); // left
+                hline(cy, h, cx - half_thin, cx - half_thin + thin); // down
+            }
+            // └ light up and right
+            0x2514 => {
+                hline(cy - half_thin, cy - half_thin + thin, cx, w); // right
+                hline(0, cy + half_thin, cx - half_thin, cx - half_thin + thin); // up
+            }
+            // ┘ light up and left
+            0x2518 => {
+                hline(cy - half_thin, cy - half_thin + thin, 0, cx + half_thin); // left
+                hline(0, cy + half_thin, cx - half_thin, cx - half_thin + thin); // up
+            }
+            // ├ light vertical and right
+            0x251C => {
+                hline(0, h, cx - half_thin, cx - half_thin + thin); // vertical
+                hline(cy - half_thin, cy - half_thin + thin, cx, w); // right
+            }
+            // ┤ light vertical and left
+            0x2524 => {
+                hline(0, h, cx - half_thin, cx - half_thin + thin); // vertical
+                hline(cy - half_thin, cy - half_thin + thin, 0, cx + half_thin); // left
+            }
+            // ┬ light down and horizontal
+            0x252C => {
+                hline(cy - half_thin, cy - half_thin + thin, 0, w); // horizontal
+                hline(cy, h, cx - half_thin, cx - half_thin + thin); // down
+            }
+            // ┴ light up and horizontal
+            0x2534 => {
+                hline(cy - half_thin, cy - half_thin + thin, 0, w); // horizontal
+                hline(0, cy + half_thin, cx - half_thin, cx - half_thin + thin); // up
+            }
+            // ┼ light cross
+            0x253C => {
+                hline(cy - half_thin, cy - half_thin + thin, 0, w); // horizontal
+                hline(0, h, cx - half_thin, cx - half_thin + thin); // vertical
+            }
+            // ═ double horizontal
+            0x2550 => {
+                let gap = thin.max(1);
+                hline(cy - gap - half_thin, cy - gap - half_thin + thin, 0, w);
+                hline(cy + gap - half_thin, cy + gap - half_thin + thin, 0, w);
+            }
+            // ║ double vertical
+            0x2551 => {
+                let gap = thin.max(1);
+                hline(0, h, cx - gap - half_thin, cx - gap - half_thin + thin);
+                hline(0, h, cx + gap - half_thin, cx + gap - half_thin + thin);
+            }
+            // ╔ double down and right
+            0x2554 => {
+                let gap = thin.max(1);
+                hline(cy - gap - half_thin, cy - gap - half_thin + thin, cx, w);
+                hline(cy + gap - half_thin, cy + gap - half_thin + thin, cx + gap, w);
+                hline(cy - gap, h, cx - gap - half_thin, cx - gap - half_thin + thin);
+                hline(cy + gap, h, cx + gap - half_thin, cx + gap - half_thin + thin);
+            }
+            // ╗ double down and left
+            0x2557 => {
+                let gap = thin.max(1);
+                hline(cy - gap - half_thin, cy - gap - half_thin + thin, 0, cx + gap + half_thin);
+                hline(cy + gap - half_thin, cy + gap - half_thin + thin, 0, cx - gap + half_thin);
+                hline(cy - gap, h, cx + gap - half_thin, cx + gap - half_thin + thin);
+                hline(cy + gap, h, cx - gap - half_thin, cx - gap - half_thin + thin);
+            }
+            // ╚ double up and right
+            0x255A => {
+                let gap = thin.max(1);
+                hline(cy - gap - half_thin, cy - gap - half_thin + thin, cx + gap, w);
+                hline(cy + gap - half_thin, cy + gap - half_thin + thin, cx, w);
+                hline(0, cy - gap + half_thin, cx - gap - half_thin, cx - gap - half_thin + thin);
+                hline(0, cy + gap + half_thin, cx + gap - half_thin, cx + gap - half_thin + thin);
+            }
+            // ╝ double up and left
+            0x255D => {
+                let gap = thin.max(1);
+                hline(cy - gap - half_thin, cy - gap - half_thin + thin, 0, cx - gap + half_thin);
+                hline(cy + gap - half_thin, cy + gap - half_thin + thin, 0, cx + gap + half_thin);
+                hline(0, cy - gap + half_thin, cx + gap - half_thin, cx + gap - half_thin + thin);
+                hline(0, cy + gap + half_thin, cx - gap - half_thin, cx - gap - half_thin + thin);
+            }
+            // ╠ double vertical and right
+            0x2560 => {
+                let gap = thin.max(1);
+                hline(0, h, cx - gap - half_thin, cx - gap - half_thin + thin);
+                hline(0, h, cx + gap - half_thin, cx + gap - half_thin + thin);
+                hline(cy - gap - half_thin, cy - gap - half_thin + thin, cx + gap, w);
+                hline(cy + gap - half_thin, cy + gap - half_thin + thin, cx + gap, w);
+            }
+            // ╣ double vertical and left
+            0x2563 => {
+                let gap = thin.max(1);
+                hline(0, h, cx - gap - half_thin, cx - gap - half_thin + thin);
+                hline(0, h, cx + gap - half_thin, cx + gap - half_thin + thin);
+                hline(cy - gap - half_thin, cy - gap - half_thin + thin, 0, cx - gap + half_thin);
+                hline(cy + gap - half_thin, cy + gap - half_thin + thin, 0, cx - gap + half_thin);
+            }
+            // ╦ double down and horizontal
+            0x2566 => {
+                let gap = thin.max(1);
+                hline(cy - gap - half_thin, cy - gap - half_thin + thin, 0, w);
+                hline(cy + gap - half_thin, cy + gap - half_thin + thin, cx + gap, w);
+                hline(cy + gap - half_thin, cy + gap - half_thin + thin, 0, cx - gap + half_thin);
+                hline(cy + gap, h, cx - gap - half_thin, cx - gap - half_thin + thin);
+                hline(cy + gap, h, cx + gap - half_thin, cx + gap - half_thin + thin);
+            }
+            // ╩ double up and horizontal
+            0x2569 => {
+                let gap = thin.max(1);
+                hline(cy + gap - half_thin, cy + gap - half_thin + thin, 0, w);
+                hline(cy - gap - half_thin, cy - gap - half_thin + thin, cx + gap, w);
+                hline(cy - gap - half_thin, cy - gap - half_thin + thin, 0, cx - gap + half_thin);
+                hline(0, cy - gap + half_thin, cx - gap - half_thin, cx - gap - half_thin + thin);
+                hline(0, cy - gap + half_thin, cx + gap - half_thin, cx + gap - half_thin + thin);
+            }
+            // ╬ double cross
+            0x256C => {
+                let gap = thin.max(1);
+                // Horizontal lines
+                hline(cy - gap - half_thin, cy - gap - half_thin + thin, 0, cx - gap + half_thin);
+                hline(cy - gap - half_thin, cy - gap - half_thin + thin, cx + gap, w);
+                hline(cy + gap - half_thin, cy + gap - half_thin + thin, 0, cx - gap + half_thin);
+                hline(cy + gap - half_thin, cy + gap - half_thin + thin, cx + gap, w);
+                // Vertical lines
+                hline(0, cy - gap + half_thin, cx - gap - half_thin, cx - gap - half_thin + thin);
+                hline(0, cy - gap + half_thin, cx + gap - half_thin, cx + gap - half_thin + thin);
+                hline(cy + gap, h, cx - gap - half_thin, cx - gap - half_thin + thin);
+                hline(cy + gap, h, cx + gap - half_thin, cx + gap - half_thin + thin);
+            }
+            // █ full block
+            0x2588 => {
+                hline(0, h, 0, w);
+            }
+            // ▌ left half block
+            0x258C => {
+                hline(0, h, 0, cx);
+            }
+            // ▐ right half block
+            0x2590 => {
+                hline(0, h, cx, w);
+            }
+            // ▀ upper half block
+            0x2580 => {
+                hline(0, cy, 0, w);
+            }
+            // ▄ lower half block
+            0x2584 => {
+                hline(cy, h, 0, w);
+            }
+            // ░ light shade
+            0x2591 => {
+                for y in 0..h {
+                    for x in 0..w {
+                        if (x + y) % 4 == 0 {
+                            pixels[y * w + x] = 255;
+                        }
+                    }
+                }
+            }
+            // ▒ medium shade
+            0x2592 => {
+                for y in 0..h {
+                    for x in 0..w {
+                        if (x + y) % 2 == 0 {
+                            pixels[y * w + x] = 255;
+                        }
+                    }
+                }
+            }
+            // ▓ dark shade
+            0x2593 => {
+                for y in 0..h {
+                    for x in 0..w {
+                        if (x + y) % 4 != 0 {
+                            pixels[y * w + x] = 255;
+                        }
+                    }
+                }
+            }
+            // For any unhandled box-drawing char, fall through to Core Text
+            _ => return None,
+        }
+
+        Some(pixels)
+    }
+
     fn rasterize_glyph(&self, key: &GlyphKey) -> Vec<u8> {
         let w = self.raster_width;
         let h = self.raster_height;
 
         if key.ch == ' ' || key.ch == '\0' {
             return vec![0u8; w * h];
+        }
+
+        // Try procedural box-drawing first — pixel-perfect, no gaps
+        if let Some(pixels) = self.rasterize_box_drawing(key.ch) {
+            return pixels;
         }
 
         let font = self.select_font(key);

@@ -20,6 +20,8 @@ pub struct Uniforms {
     pub atlas_height: f32,
     pub viewport_width: f32,
     pub viewport_height: f32,
+    pub x_origin: f32,
+    pub y_origin: f32,
 }
 
 // C4 fix: Layout matches Metal's packed struct exactly. All fields are scalar
@@ -63,6 +65,10 @@ pub struct MetalContext {
     pub cell_buffer: Retained<ProtocolObject<dyn MTLBuffer>>,
     pub uniforms_buffer: Retained<ProtocolObject<dyn MTLBuffer>>,
     pub cell_capacity: usize,
+    // Sidebar GPU resources
+    pub sidebar_cell_buffer: Retained<ProtocolObject<dyn MTLBuffer>>,
+    pub sidebar_uniforms_buffer: Retained<ProtocolObject<dyn MTLBuffer>>,
+    pub sidebar_cell_capacity: usize,
 }
 
 impl MetalContext {
@@ -122,6 +128,16 @@ impl MetalContext {
             )
             .ok_or_else(|| CockpitError::Metal("failed to create uniforms buffer".into()))?;
 
+        // Sidebar buffers — start with a small default
+        let sidebar_default_capacity = 40 * 40;
+        let sidebar_cell_buffer = Self::alloc_cell_buffer(&device, sidebar_default_capacity)?;
+        let sidebar_uniforms_buffer: Retained<ProtocolObject<dyn MTLBuffer>> = device
+            .newBufferWithLength_options(
+                std::mem::size_of::<Uniforms>(),
+                MTLResourceOptions::StorageModeShared,
+            )
+            .ok_or_else(|| CockpitError::Metal("failed to create sidebar uniforms buffer".into()))?;
+
         Ok(Self {
             device,
             command_queue,
@@ -129,6 +145,9 @@ impl MetalContext {
             cell_buffer,
             uniforms_buffer,
             cell_capacity,
+            sidebar_cell_buffer,
+            sidebar_uniforms_buffer,
+            sidebar_cell_capacity: sidebar_default_capacity,
         })
     }
 
@@ -140,6 +159,17 @@ impl MetalContext {
         }
         self.cell_buffer = Self::alloc_cell_buffer(&self.device, needed)?;
         self.cell_capacity = needed;
+        Ok(())
+    }
+
+    /// Reallocate the sidebar cell buffer if needed.
+    pub fn resize_sidebar_if_needed(&mut self, sidebar_cols: u32, sidebar_rows: u32) -> Result<()> {
+        let needed = (sidebar_cols as usize) * (sidebar_rows as usize);
+        if needed <= self.sidebar_cell_capacity {
+            return Ok(());
+        }
+        self.sidebar_cell_buffer = Self::alloc_cell_buffer(&self.device, needed)?;
+        self.sidebar_cell_capacity = needed;
         Ok(())
     }
 

@@ -6,6 +6,10 @@ pub struct CockpitConfig {
     pub sidebar_width: u32,
     pub sidebar_visible: bool,
     pub colors: ColorScheme,
+    pub poll_usage_secs: u64,
+    pub poll_sessions_secs: u64,
+    pub line_height_factor: f32,
+    pub terminal_padding: f32,
 }
 
 pub struct ColorScheme {
@@ -19,11 +23,15 @@ impl Default for CockpitConfig {
     fn default() -> Self {
         Self {
             font_family: String::from("Menlo"),
-            font_size: 14.0,
+            font_size: 18.0,
             scrollback_lines: 10_000,
-            sidebar_width: 280,
+            sidebar_width: 320,
             sidebar_visible: true,
             colors: ColorScheme::default(),
+            poll_usage_secs: 180,
+            poll_sessions_secs: 5,
+            line_height_factor: 1.2,
+            terminal_padding: 8.0,
         }
     }
 }

@@ -77,6 +77,8 @@ pub struct Grid {
     cols: usize,
     visible_rows: usize,
     scrollback: ScrollbackBuffer,
+    /// When true, scroll_up does not push lines to scrollback (alternate screen mode).
+    pub suppress_scrollback: bool,
 }
 
 impl Grid {
@@ -87,6 +89,7 @@ impl Grid {
             cols,
             visible_rows,
             scrollback: ScrollbackBuffer::new(scrollback_capacity),
+            suppress_scrollback: false,
         }
     }
 
@@ -130,7 +133,7 @@ impl Grid {
         let count = count.min(bottom - top);
 
         // Move scrolled-off rows to scrollback before they get rotated to the end
-        if top == 0 {
+        if top == 0 && !self.suppress_scrollback {
             // Swap each row being scrolled off with a blank, push the original
             // to scrollback, then rotate the region. This way we take ownership
             // of the row content without cloning.
@@ -218,6 +221,28 @@ impl Grid {
     /// Number of rows in scrollback.
     pub fn scrollback_len(&self) -> usize {
         self.scrollback.len()
+    }
+
+    /// Get a cell at (row, col) with a scroll offset.
+    /// offset=0 shows the live terminal. offset=N shifts the viewport N lines
+    /// into scrollback history.
+    pub fn cell_scrolled(&self, row: usize, col: usize, scroll_offset: usize) -> Option<&Cell> {
+        if scroll_offset == 0 {
+            return self.cell(row, col);
+        }
+        let sb_len = self.scrollback.len();
+        // The viewport when scrolled: the top `scroll_offset` rows come from
+        // scrollback (from the end), then the rest from visible rows.
+        let sb_start = sb_len.saturating_sub(scroll_offset);
+        let sb_row_idx = sb_start + row;
+        if sb_row_idx < sb_len {
+            // This row is in scrollback
+            self.scrollback.get(sb_row_idx)?.get(col)
+        } else {
+            // This row is in visible area
+            let visible_row = sb_row_idx - sb_len;
+            self.cell(visible_row, col)
+        }
     }
 
     /// Clear all visible rows.

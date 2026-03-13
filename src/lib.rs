@@ -5,6 +5,6 @@ pub mod pty;
 pub mod vt;
 pub mod grid;
 pub mod gpu;
-pub mod session;
 pub mod sidebar;
+pub mod event_policy;
 pub mod app;

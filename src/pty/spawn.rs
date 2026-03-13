@@ -1,12 +1,47 @@
 use std::ffi::CString;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::sync::Mutex;
 
 use nix::libc;
 use nix::pty::openpty;
+use nix::sys::signal::{self, Signal};
 use nix::sys::wait::{waitpid, WaitPidFlag};
 use nix::unistd::{close, dup2, execvp, fork, setsid, ForkResult, Pid};
 
 use crate::error::{CockpitError, Result};
+
+// ---------------------------------------------------------------------------
+// Global zombie reaper
+// ---------------------------------------------------------------------------
+
+/// PIDs awaiting reap. `Drop` pushes here; the event loop calls `reap_zombies()`.
+static REAPER: Mutex<Vec<Pid>> = Mutex::new(Vec::new());
+
+/// Non-blocking reap of all tracked PIDs.
+///
+/// Call this from the event loop (e.g. `about_to_wait`). It does a non-blocking
+/// `waitpid` on every PID in the list and removes those that have exited.
+pub fn reap_zombies() {
+    let Ok(mut pids) = REAPER.lock() else {
+        return; // poisoned — nothing we can do in a safe way
+    };
+    pids.retain(|&pid| {
+        match waitpid(pid, Some(WaitPidFlag::WNOHANG)) {
+            Ok(nix::sys::wait::WaitStatus::StillAlive) => true, // keep watching
+            Ok(_) => false,  // exited / signaled — reap complete
+            Err(_) => false, // ECHILD etc. — already gone
+        }
+    });
+}
+
+/// Return a snapshot of the PIDs currently tracked by the reaper.
+/// Useful for testing.
+pub fn reaper_pids() -> Vec<Pid> {
+    let Ok(pids) = REAPER.lock() else {
+        return Vec::new();
+    };
+    pids.clone()
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct PtySize {
@@ -189,5 +224,115 @@ impl PtyHandle {
     /// Get the current size.
     pub fn size(&self) -> PtySize {
         self.size
+    }
+}
+
+impl Drop for PtyHandle {
+    fn drop(&mut self) {
+        // Only send SIGHUP if the child is still alive (kill with signal 0 checks).
+        // This prevents signaling a reused PID after the child has already been reaped.
+        if signal::kill(self.child_pid, None).is_ok() {
+            let _ = signal::kill(self.child_pid, Signal::SIGHUP);
+        }
+        // Hand the PID to the global reaper so the event loop can collect it
+        // with non-blocking waitpid on subsequent frames.
+        if let Ok(mut pids) = REAPER.lock() {
+            pids.push(self.child_pid);
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use nix::sys::signal::Signal;
+    use nix::unistd::Pid;
+    use std::process::Command;
+
+    /// Helper: clear the reaper list so tests don't interfere with each other.
+    fn clear_reaper() {
+        REAPER.lock().unwrap().clear();
+    }
+
+    /// After dropping a PtyHandle, the child PID should appear in the REAPER list.
+    #[test]
+    fn test_reaper_collects_pid() {
+        clear_reaper();
+
+        let handle = PtyHandle::spawn(PtySize::new(80, 24)).unwrap();
+        let pid = handle.child_pid();
+
+        // Drop the handle — should push PID into the reaper
+        drop(handle);
+
+        let pids = reaper_pids();
+        assert!(
+            pids.contains(&pid),
+            "expected PID {pid} in reaper list, got {pids:?}"
+        );
+
+        // Clean up: reap until the child is gone
+        for _ in 0..50 {
+            reap_zombies();
+            if !reaper_pids().contains(&pid) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    /// Spawn a process, kill it, add its PID to the reaper, call reap_zombies —
+    /// the PID should be removed because the process has exited.
+    #[test]
+    fn test_reap_zombies_cleans_exited() {
+        clear_reaper();
+
+        // Spawn a short-lived child via std::process so we control it directly
+        let child = Command::new("sleep").arg("300").spawn().unwrap();
+        let pid = Pid::from_raw(child.id() as i32);
+
+        // Kill it immediately
+        signal::kill(pid, Signal::SIGKILL).unwrap();
+
+        // Give the kernel a moment to deliver the signal
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Manually push into reaper
+        REAPER.lock().unwrap().push(pid);
+        assert!(reaper_pids().contains(&pid));
+
+        // Reap — the exited process should be collected
+        reap_zombies();
+
+        assert!(
+            !reaper_pids().contains(&pid),
+            "PID {pid} should have been reaped"
+        );
+    }
+
+    /// A still-running PID should remain in the reaper list after reap_zombies.
+    #[test]
+    fn test_reap_zombies_keeps_alive() {
+        clear_reaper();
+
+        // Spawn a long-lived child
+        let child = Command::new("sleep").arg("300").spawn().unwrap();
+        let pid = Pid::from_raw(child.id() as i32);
+
+        REAPER.lock().unwrap().push(pid);
+
+        // Reap — child is alive, so PID should stay
+        reap_zombies();
+
+        assert!(
+            reaper_pids().contains(&pid),
+            "PID {pid} should still be in the reaper (process is alive)"
+        );
+
+        // Cleanup: kill and reap
+        let _ = signal::kill(pid, Signal::SIGKILL);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        reap_zombies();
     }
 }

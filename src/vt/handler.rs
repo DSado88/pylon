@@ -374,27 +374,27 @@ impl<'a> VtHandler<'a> {
                         };
                     }
                     1049 => {
-                        // Alternate screen buffer
+                        // Alternate screen buffer — suppress scrollback while active
                         if enable && !self.state.alternate_screen {
                             self.state.saved_cursor = Some(self.state.cursor.clone());
                             self.grid.clear_visible();
                             self.state.alternate_screen = true;
+                            self.grid.suppress_scrollback = true;
                             self.dirty.mark_all();
                         } else if !enable && self.state.alternate_screen {
                             if let Some(saved) = self.state.saved_cursor.take() {
                                 self.state.cursor = saved;
                             }
                             self.state.alternate_screen = false;
+                            self.grid.suppress_scrollback = false;
                             self.dirty.mark_all();
                         }
                     }
                     2004 => self.state.bracketed_paste = enable,
                     _ => {}
                 }
-            } else {
-                if param == 4 {
-                    self.state.insert_mode = enable;
-                }
+            } else if param == 4 {
+                self.state.insert_mode = enable;
             }
         }
     }
@@ -443,14 +443,14 @@ impl<'a> vte::Perform for VtHandler<'a> {
                 self.state.pending_wrap = false;
                 let n = param(0, 1);
                 let max_row = self.rows().saturating_sub(1);
-                self.state.cursor.row = (self.state.cursor.row + n).min(max_row);
+                self.state.cursor.row = self.state.cursor.row.saturating_add(n).min(max_row);
             }
             'C' => {
                 // Cursor Forward
                 self.state.pending_wrap = false;
                 let n = param(0, 1);
                 let max_col = self.cols().saturating_sub(1);
-                self.state.cursor.col = (self.state.cursor.col + n).min(max_col);
+                self.state.cursor.col = self.state.cursor.col.saturating_add(n).min(max_col);
             }
             'D' => {
                 // Cursor Back
@@ -476,7 +476,7 @@ impl<'a> vte::Perform for VtHandler<'a> {
                 if self.state.origin_mode {
                     let top = self.state.scroll_top();
                     let bottom = self.state.scroll_bottom();
-                    self.state.cursor.row = (top + row).min(bottom.saturating_sub(1));
+                    self.state.cursor.row = top.saturating_add(row).min(bottom.saturating_sub(1));
                 } else {
                     self.state.cursor.row = row.min(max_row);
                 }
@@ -661,7 +661,7 @@ impl<'a> vte::Perform for VtHandler<'a> {
                 // Set window title
                 if let Some(title_bytes) = params.get(1) {
                     if let Ok(title) = std::str::from_utf8(title_bytes) {
-                        self.state.window_title = title.to_string();
+                        self.state.window_title = title.chars().take(512).collect();
                     }
                 }
             }
@@ -677,6 +677,88 @@ impl<'a> vte::Perform for VtHandler<'a> {
 
     fn put(&mut self, _byte: u8) {
         // DCS data - not needed for basic operation
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
+mod tests {
+    use super::*;
+    use crate::grid::storage::Grid;
+    use crate::primitives::DirtyRows;
+    use std::sync::Arc;
+
+    /// Feed raw bytes through a vte::Parser into a VtHandler.
+    fn feed(handler: &mut VtHandler<'_>, bytes: &[u8]) {
+        let mut parser = vte::Parser::new();
+        parser.advance(handler, bytes);
+    }
+
+    #[test]
+    fn test_cup_origin_mode_no_overflow() {
+        // 80x24 terminal
+        let mut grid = Grid::new(24, 80, 0);
+        let mut state = TerminalState::new(24, 80);
+        let dirty = Arc::new(DirtyRows::new());
+
+        // Set scroll region to rows 10..20 (1-indexed: 11..20)
+        // CSI 11;20 r
+        state.scroll_region = (10, 20);
+
+        // Enable origin mode: CSI ?6h
+        state.origin_mode = true;
+        state.cursor.row = 10; // top of scroll region
+
+        {
+            let mut handler = VtHandler::new(&mut grid, &mut state, &dirty);
+            // CUP with row=65535 (1-indexed), which becomes 65534 after saturating_sub(1)
+            // In origin mode: top(10) + row(65534) would overflow u16
+            // CSI 65535;1 H
+            feed(&mut handler, b"\x1b[65535;1H");
+        }
+
+        // Should be clamped to bottom-1 = 19, not panicked/wrapped
+        assert_eq!(state.cursor.row, 19);
+    }
+
+    #[test]
+    fn test_cursor_down_no_overflow() {
+        let mut grid = Grid::new(24, 80, 0);
+        let mut state = TerminalState::new(24, 80);
+        let dirty = Arc::new(DirtyRows::new());
+
+        // Put cursor near u16::MAX
+        state.cursor.row = 65000;
+
+        {
+            let mut handler = VtHandler::new(&mut grid, &mut state, &dirty);
+            // Cursor Down by 65000: cursor.row(65000) + n(65000) overflows u16
+            // CSI 65000 B
+            feed(&mut handler, b"\x1b[65000B");
+        }
+
+        // Should be clamped to max_row (rows-1 = 23), not panicked/wrapped
+        assert_eq!(state.cursor.row, 23);
+    }
+
+    #[test]
+    fn test_cursor_forward_no_overflow() {
+        let mut grid = Grid::new(24, 80, 0);
+        let mut state = TerminalState::new(24, 80);
+        let dirty = Arc::new(DirtyRows::new());
+
+        // Put cursor near u16::MAX
+        state.cursor.col = 65000;
+
+        {
+            let mut handler = VtHandler::new(&mut grid, &mut state, &dirty);
+            // Cursor Forward by 65000: cursor.col(65000) + n(65000) overflows u16
+            // CSI 65000 C
+            feed(&mut handler, b"\x1b[65000C");
+        }
+
+        // Should be clamped to max_col (cols-1 = 79), not panicked/wrapped
+        assert_eq!(state.cursor.col, 79);
     }
 }
 

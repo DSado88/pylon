@@ -19,6 +19,8 @@ pub enum CockpitError {
     Io { path: PathBuf, source: std::io::Error },
     #[error("Session error: {0}")]
     Session(String),
+    #[error("Sidebar error: {0}")]
+    Sidebar(String),
 }
 
 pub type Result<T> = std::result::Result<T, CockpitError>;

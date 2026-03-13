@@ -10,6 +10,8 @@ struct Uniforms {
     float atlas_height;
     float viewport_width;
     float viewport_height;
+    float x_origin;
+    float y_origin;
 };
 
 // C4 fix: Use packed_float4 so the struct layout matches Rust's [f32; 4]
@@ -52,9 +54,9 @@ vertex VertexOut cell_vertex(
     uint indices[6] = {0, 1, 2, 2, 1, 3};
     float2 corner = corners[indices[vertex_id]];
 
-    // Convert to screen coordinates
-    float x = (float(col) + corner.x) * uniforms.cell_width;
-    float y = (float(row) + corner.y) * uniforms.cell_height;
+    // Convert to screen coordinates with origin offsets for positioning
+    float x = (float(col) + corner.x) * uniforms.cell_width + uniforms.x_origin;
+    float y = (float(row) + corner.y) * uniforms.cell_height + uniforms.y_origin;
 
     // Normalize to Metal clip space (-1 to 1)
     float2 ndc;
