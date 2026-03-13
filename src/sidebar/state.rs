@@ -50,6 +50,10 @@ pub struct SidebarState {
     /// Which tab is currently hovered in the sidebar (for highlight).
     pub hovered_tab: Option<usize>,
     pub dirty: bool,
+    /// Sidebar scroll offset in rows. 0 = top.
+    pub scroll_offset: u16,
+    /// Total content height from last render (for scroll clamping).
+    pub content_rows: u16,
 }
 
 impl SidebarState {
@@ -64,6 +68,8 @@ impl SidebarState {
             hit_map: Vec::new(),
             hovered_tab: None,
             dirty: true,
+            scroll_offset: 0,
+            content_rows: 0,
         }
     }
 
@@ -74,6 +80,7 @@ impl SidebarState {
 
     pub fn switch_panel(&mut self, panel: SidebarPanel) {
         self.panel = panel;
+        self.scroll_offset = 0;
         self.dirty = true;
     }
 }

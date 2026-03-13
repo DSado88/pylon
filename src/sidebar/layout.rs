@@ -36,45 +36,85 @@ fn max_col(cols: u16) -> u16 {
     cols.saturating_sub(PAD_RIGHT)
 }
 
+/// Render the sidebar, returning (cells, content_height).
+/// `scroll_offset` shifts the viewport down by that many rows.
 pub fn render_sidebar(
     state: &SidebarState,
     cols: u16,
     rows: u16,
     active_tab: usize,
     hovered_tab: Option<usize>,
+    scroll_offset: u16,
     atlas: &mut GlyphAtlas,
     hit_map_out: &mut Vec<SidebarHitEntry>,
-) -> Vec<GpuCell> {
-    let count = cols as usize * rows as usize;
-    let mut cells = vec![GpuCell::default(); count];
+) -> (Vec<GpuCell>, u16) {
+    // Render into a virtual buffer tall enough for all content.
+    // Use 4x visible rows as a generous upper bound.
+    let virtual_rows = (rows as usize * 4).max(200);
+    let virtual_count = cols as usize * virtual_rows;
+    let mut virtual_cells = vec![GpuCell::default(); virtual_count];
 
-    // Fill background
-    for cell in &mut cells {
+    for cell in &mut virtual_cells {
         cell.bg_color = SIDEBAR_BG;
     }
 
     hit_map_out.clear();
 
-    match state.panel {
-        SidebarPanel::Usage => render_usage_panel(&mut cells, cols, rows, &state.accounts, atlas),
+    let content_height = match state.panel {
+        SidebarPanel::Usage => {
+            render_usage_panel(&mut virtual_cells, cols, virtual_rows as u16, &state.accounts, atlas)
+        }
         SidebarPanel::Sessions => {
             render_sessions_panel(
-                &mut cells,
+                &mut virtual_cells,
                 cols,
-                rows,
+                virtual_rows as u16,
                 &state.tab_entries,
                 active_tab,
                 hovered_tab,
                 atlas,
                 hit_map_out,
-            );
+            )
         }
         SidebarPanel::Output => {
-            render_output_panel(&mut cells, cols, rows, atlas);
+            render_output_panel(&mut virtual_cells, cols, virtual_rows as u16, atlas)
+        }
+    };
+
+    // Copy visible window from virtual buffer into output, applying scroll offset.
+    let out_count = cols as usize * rows as usize;
+    let mut cells = vec![GpuCell::default(); out_count];
+    for cell in &mut cells {
+        cell.bg_color = SIDEBAR_BG;
+    }
+
+    let offset = scroll_offset as usize;
+    for row in 0..rows as usize {
+        let src_row = row + offset;
+        if src_row >= virtual_rows {
+            break;
+        }
+        let src_start = src_row * cols as usize;
+        let dst_start = row * cols as usize;
+        for col in 0..cols as usize {
+            if let (Some(src), Some(dst)) = (
+                virtual_cells.get(src_start + col),
+                cells.get_mut(dst_start + col),
+            ) {
+                *dst = *src;
+            }
         }
     }
 
-    cells
+    // Adjust hit_map entries by scroll offset
+    for entry in hit_map_out.iter_mut() {
+        entry.start_row = entry.start_row.saturating_sub(scroll_offset);
+        entry.end_row = entry.end_row.saturating_sub(scroll_offset);
+    }
+    // Remove entries that scrolled off screen
+    hit_map_out.retain(|e| e.end_row > 0 && e.start_row < rows);
+
+    (cells, content_height)
 }
 
 fn render_usage_panel(
@@ -83,7 +123,7 @@ fn render_usage_panel(
     _rows: u16,
     accounts: &[AccountUsage],
     atlas: &mut GlyphAtlas,
-) {
+) -> u16 {
     let mc = max_col(cols);
     let mut row: u16 = 1;
 
@@ -96,7 +136,7 @@ fn render_usage_panel(
 
     if accounts.is_empty() {
         write_str(cells, cols, row, PAD_LEFT, mc, "Loading...", DIM_FG, SIDEBAR_BG, atlas);
-        return;
+        return row + 1;
     }
 
     for (i, account) in accounts.iter().enumerate() {
@@ -182,6 +222,7 @@ fn render_usage_panel(
             row += 1;
         }
     }
+    row
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -194,7 +235,7 @@ fn render_sessions_panel(
     hovered_tab: Option<usize>,
     atlas: &mut GlyphAtlas,
     hit_map: &mut Vec<SidebarHitEntry>,
-) {
+) -> u16 {
     let mc = max_col(cols);
     let mut row: u16 = 1;
 
@@ -207,7 +248,7 @@ fn render_sessions_panel(
 
     if entries.is_empty() {
         write_str(cells, cols, row, PAD_LEFT, mc, "No sessions", DIM_FG, SIDEBAR_BG, atlas);
-        return;
+        return row + 1;
     }
 
     for entry in entries {
@@ -278,6 +319,7 @@ fn render_sessions_panel(
 
         row += 1; // breathing room between cards
     }
+    row
 }
 
 /// Fill card background color for a range of rows.
@@ -299,7 +341,7 @@ fn render_output_panel(
     cols: u16,
     _rows: u16,
     atlas: &mut GlyphAtlas,
-) {
+) -> u16 {
     let mc = max_col(cols);
     let mut row: u16 = 1;
 
@@ -324,6 +366,7 @@ fn render_output_panel(
         write_str(cells, cols, row, desc_col, mc, desc, LABEL_FG, SIDEBAR_BG, atlas);
         row += 2; // double spacing for readability
     }
+    row
 }
 
 /// Paint a thin vertical accent on the left edge of a card row range.

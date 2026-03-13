@@ -285,7 +285,7 @@ impl App {
     ) -> Result<(WindowId, TerminalWindow)> {
         let attrs = WindowAttributes::default()
             .with_title("Claude Cockpit")
-            .with_inner_size(winit::dpi::LogicalSize::new(1440.0, 900.0))
+            .with_inner_size(winit::dpi::LogicalSize::new(1680.0, 1050.0))
             .with_tabbing_identifier(TABBING_ID);
 
         let window = event_loop
@@ -670,16 +670,18 @@ impl App {
                 } else {
                     None
                 };
-                let sidebar_cells = layout::render_sidebar(
+                let (sidebar_cells, content_rows) = layout::render_sidebar(
                     sidebar,
                     render_cols,
                     render_rows,
                     *active_tab,
                     hover,
+                    sidebar.scroll_offset,
                     &mut renderer.atlas,
                     &mut hit_map,
                 );
                 sidebar.hit_map = hit_map;
+                sidebar.content_rows = content_rows;
 
                 renderer.upload_sidebar_cells(&sidebar_cells);
                 // Only mark sidebar as clean if resize succeeded;
@@ -1743,7 +1745,31 @@ impl ApplicationHandler for App {
                     }
                 };
 
-                if let Some((_, tw)) = self.windows.get_mut(idx) {
+                // Check if cursor is in the sidebar area
+                let in_sidebar = self.sidebar.visible && self.windows.get(idx).is_some_and(|(_, tw)| {
+                    let width = tw.cockpit_window.window.inner_size().width;
+                    let edge_x = width.saturating_sub(tw.sidebar_width) as f64;
+                    self.cursor_x > edge_x
+                });
+
+                if in_sidebar {
+                    // Scroll the sidebar
+                    let visible_rows = self.windows.get(idx)
+                        .map(|(_, tw)| tw.grid_rows)
+                        .unwrap_or(40);
+                    let max_scroll = self.sidebar.content_rows.saturating_sub(visible_rows);
+                    let new_offset = if lines > 0 {
+                        self.sidebar.scroll_offset
+                            .saturating_add(lines as u16)
+                            .min(max_scroll)
+                    } else {
+                        self.sidebar.scroll_offset.saturating_sub((-lines) as u16)
+                    };
+                    if new_offset != self.sidebar.scroll_offset {
+                        self.sidebar.scroll_offset = new_offset;
+                        self.sidebar_version += 1;
+                    }
+                } else if let Some((_, tw)) = self.windows.get_mut(idx) {
                     let max_offset = tw
                         .grid
                         .read()

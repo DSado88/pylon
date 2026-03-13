@@ -23,7 +23,7 @@ impl Default for CockpitConfig {
     fn default() -> Self {
         Self {
             font_family: String::from("Menlo"),
-            font_size: 18.0,
+            font_size: 14.0,
             scrollback_lines: 10_000,
             sidebar_width: 320,
             sidebar_visible: true,
