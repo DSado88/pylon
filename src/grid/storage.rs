@@ -191,6 +191,16 @@ impl Grid {
 
     /// Resize the grid. Existing content is preserved where possible.
     pub fn resize(&mut self, new_rows: usize, new_cols: usize) {
+        self.resize_inner(new_rows, new_cols, true);
+    }
+
+    /// Resize without pushing excess rows to scrollback.
+    /// Use for font-size changes where the content is re-rendered by the shell.
+    pub fn resize_discard(&mut self, new_rows: usize, new_cols: usize) {
+        self.resize_inner(new_rows, new_cols, false);
+    }
+
+    fn resize_inner(&mut self, new_rows: usize, new_cols: usize, preserve_scrollback: bool) {
         // Resize existing rows' column count
         for row in &mut self.rows {
             row.resize(new_cols);
@@ -202,10 +212,15 @@ impl Grid {
                 self.rows.push(Row::new(new_cols));
             }
         } else if new_rows < self.visible_rows {
-            // Push excess rows to scrollback before removing — drain takes ownership
             let excess = self.visible_rows - new_rows;
-            for row in self.rows.drain(..excess) {
-                self.scrollback.push(row);
+            if preserve_scrollback {
+                // Push excess rows to scrollback before removing
+                for row in self.rows.drain(..excess) {
+                    self.scrollback.push(row);
+                }
+            } else {
+                // Discard excess rows (font resize — shell will re-render)
+                self.rows.drain(..excess);
             }
         }
 

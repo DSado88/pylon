@@ -87,8 +87,22 @@ impl TerminalWindow {
     }
 
     fn resize(&mut self, cols: u16, rows: u16) {
+        self.resize_inner(cols, rows, true);
+    }
+
+    /// Resize without pushing excess rows to scrollback.
+    /// Used for font-size changes where the shell re-renders anyway.
+    fn resize_discard(&mut self, cols: u16, rows: u16) {
+        self.resize_inner(cols, rows, false);
+    }
+
+    fn resize_inner(&mut self, cols: u16, rows: u16, preserve_scrollback: bool) {
         if let Ok(mut grid) = self.grid.write() {
-            grid.resize(rows as usize, cols as usize);
+            if preserve_scrollback {
+                grid.resize(rows as usize, cols as usize);
+            } else {
+                grid.resize_discard(rows as usize, cols as usize);
+            }
         }
         self.vt_state.scroll_region = (0, rows);
         self.vt_state.clamp_cursor(rows, cols);
@@ -665,7 +679,15 @@ impl App {
         )
     }
 
+    fn handle_resize_window_font(&mut self, idx: usize) {
+        self.handle_resize_window_inner(idx, false);
+    }
+
     fn handle_resize_window(&mut self, idx: usize) {
+        self.handle_resize_window_inner(idx, true);
+    }
+
+    fn handle_resize_window_inner(&mut self, idx: usize, preserve_scrollback: bool) {
         let Self {
             windows,
             config,
@@ -732,7 +754,11 @@ impl App {
             }
         }
 
-        tw.resize(new_cols, new_rows);
+        if preserve_scrollback {
+            tw.resize(new_cols, new_rows);
+        } else {
+            tw.resize_discard(new_cols, new_rows);
+        }
         tw.sidebar_cols = new_sidebar_cols;
         // Force sidebar re-render on next frame
         tw.sidebar_rendered_version = 0;
@@ -797,7 +823,7 @@ impl App {
         tw.dirty_rows.mark_all();
         tw.sidebar_rendered_version = 0;
 
-        self.handle_resize_window(window_idx);
+        self.handle_resize_window_font(window_idx);
     }
 
     /// Paste clipboard contents into the PTY, with bracketed paste support.
