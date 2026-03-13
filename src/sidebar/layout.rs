@@ -41,6 +41,7 @@ pub fn render_sidebar(
     cols: u16,
     rows: u16,
     active_tab: usize,
+    hovered_tab: Option<usize>,
     atlas: &mut GlyphAtlas,
     hit_map_out: &mut Vec<SidebarHitEntry>,
 ) -> Vec<GpuCell> {
@@ -63,7 +64,7 @@ pub fn render_sidebar(
                 rows,
                 &state.tab_entries,
                 active_tab,
-                state.hovered_tab,
+                hovered_tab,
                 atlas,
                 hit_map_out,
             );

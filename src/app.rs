@@ -123,6 +123,8 @@ pub struct App {
     /// Incremented whenever sidebar data changes. Each window compares against
     /// its own `sidebar_rendered_version` to know when to re-render.
     sidebar_version: u64,
+    /// Which window index currently has the mouse cursor (for per-window hover).
+    cursor_hover_window: Option<usize>,
     config: CockpitConfig,
     modifiers: ModifiersState,
     // Tokio runtime handle for spawning async tasks
@@ -252,6 +254,7 @@ impl App {
             windows: Vec::new(),
             sidebar,
             sidebar_version: 1, // start at 1 so initial render triggers
+            cursor_hover_window: None,
             config,
             modifiers: ModifiersState::empty(),
             rt_handle,
@@ -508,6 +511,7 @@ impl App {
             config,
             active_tab,
             cursor_blink_visible,
+            cursor_hover_window,
             selection,
             ..
         } = self;
@@ -656,11 +660,18 @@ impl App {
                 let render_cols = sb_cols as u16;
                 let render_rows = sb_rows as u16;
                 let mut hit_map = Vec::new();
+                // Only show hover highlight in the window that has the cursor
+                let hover = if *cursor_hover_window == Some(idx) {
+                    sidebar.hovered_tab
+                } else {
+                    None
+                };
                 let sidebar_cells = layout::render_sidebar(
                     sidebar,
                     render_cols,
                     render_rows,
                     *active_tab,
+                    hover,
                     &mut renderer.atlas,
                     &mut hit_map,
                 );
@@ -1484,6 +1495,7 @@ impl ApplicationHandler for App {
                     }
                 } else if self.sidebar.visible {
                     if let Some((_, tw)) = self.windows.get(idx) {
+                        self.cursor_hover_window = Some(idx);
                         let width = tw.cockpit_window.window.inner_size().width;
                         let edge_x = width.saturating_sub(self.config.sidebar_width) as f64;
                         if (position.x - edge_x).abs() < 5.0 {
@@ -1505,16 +1517,21 @@ impl ApplicationHandler for App {
                                     .map(|entry| entry.tab_index);
                                 if new_hovered != self.sidebar.hovered_tab {
                                     self.sidebar.hovered_tab = new_hovered;
-                                    self.sidebar.dirty = true;
-                                    self.sidebar_version += 1;
+                                    // Only mark this window's sidebar dirty, not all
+                                    if let Some((_, tw)) = self.windows.get_mut(idx) {
+                                        tw.sidebar_rendered_version = 0;
+                                        tw.cockpit_window.window.request_redraw();
+                                    }
                                 }
                             }
                         } else {
                             tw.cockpit_window.window.set_cursor(CursorIcon::Default);
                             if self.sidebar.hovered_tab.is_some() {
                                 self.sidebar.hovered_tab = None;
-                                self.sidebar.dirty = true;
-                                self.sidebar_version += 1;
+                                if let Some((_, tw)) = self.windows.get_mut(idx) {
+                                    tw.sidebar_rendered_version = 0;
+                                    tw.cockpit_window.window.request_redraw();
+                                }
                             }
                         }
                     }
