@@ -318,7 +318,7 @@ impl App {
         let cell_h = renderer.atlas.cell_height;
 
         let sidebar_logical = if self.sidebar.visible {
-            self.config.sidebar_width as f32 / scale
+            self.config.sidebar_width as f32
         } else {
             0.0
         };
@@ -698,7 +698,7 @@ impl App {
         };
 
         if draw_sidebar {
-            let sidebar_x = vp_w - tw.sidebar_width as f32 / scale;
+            let sidebar_x = vp_w - tw.sidebar_width as f32;
             renderer.update_sidebar_uniforms(
                 sb_cols,
                 sb_rows,
@@ -763,7 +763,7 @@ impl App {
         let logical_h = phys_size.height as f32 / scale;
 
         let sidebar_logical = if sidebar.visible {
-            tw.sidebar_width as f32 / scale
+            tw.sidebar_width as f32
         } else {
             0.0
         };
@@ -1488,9 +1488,12 @@ impl ApplicationHandler for App {
                 if self.dragging_sidebar {
                     if let Some((_, tw)) = self.windows.get_mut(idx) {
                         let size = tw.cockpit_window.window.inner_size();
-                        let new_width = (size.width as f64 - position.x)
+                        let scale = tw.cockpit_window.window.scale_factor();
+                        // Convert physical drag to logical pixels for storage
+                        let phys_width = (size.width as f64 - position.x)
                             .max(100.0)
-                            .min(size.width as f64 * 0.6) as u32;
+                            .min(size.width as f64 * 0.6);
+                        let new_width = (phys_width / scale).round() as u32;
                         if new_width != tw.sidebar_width {
                             tw.sidebar_width = new_width;
                             // Resize only this window
@@ -1501,7 +1504,8 @@ impl ApplicationHandler for App {
                     if let Some((_, tw)) = self.windows.get(idx) {
                         self.cursor_hover_window = Some(idx);
                         let width = tw.cockpit_window.window.inner_size().width;
-                        let edge_x = width.saturating_sub(tw.sidebar_width) as f64;
+                        let sb_phys = (tw.sidebar_width as f64 * tw.cockpit_window.window.scale_factor()).round() as u32;
+                        let edge_x = width.saturating_sub(sb_phys) as f64;
                         if (position.x - edge_x).abs() < 5.0 {
                             tw.cockpit_window.window.set_cursor(CursorIcon::ColResize);
                         } else if position.x > edge_x {
@@ -1555,8 +1559,9 @@ impl ApplicationHandler for App {
                         (width, cell_h, cell_w, scale, cols, rows, sb_width)
                     });
                     if let Some((width, cell_h, cell_w, scale, cols, rows, sb_width)) = win_info {
+                        let sb_phys = (sb_width as f64 * scale).round() as u32;
                         let edge_x = if self.sidebar.visible {
-                            width.saturating_sub(sb_width) as f64
+                            width.saturating_sub(sb_phys) as f64
                         } else {
                             width as f64
                         };
@@ -1748,7 +1753,8 @@ impl ApplicationHandler for App {
                 // Check if cursor is in the sidebar area
                 let in_sidebar = self.sidebar.visible && self.windows.get(idx).is_some_and(|(_, tw)| {
                     let width = tw.cockpit_window.window.inner_size().width;
-                    let edge_x = width.saturating_sub(tw.sidebar_width) as f64;
+                    let sb_phys = (tw.sidebar_width as f64 * tw.cockpit_window.window.scale_factor()).round() as u32;
+                    let edge_x = width.saturating_sub(sb_phys) as f64;
                     self.cursor_x > edge_x
                 });
 

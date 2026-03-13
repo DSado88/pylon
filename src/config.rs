@@ -25,7 +25,7 @@ impl Default for CockpitConfig {
             font_family: String::from("Menlo"),
             font_size: 14.0,
             scrollback_lines: 10_000,
-            sidebar_width: 640,
+            sidebar_width: 320, // logical pixels (scale-independent)
             sidebar_visible: true,
             colors: ColorScheme::default(),
             poll_usage_secs: 180,
