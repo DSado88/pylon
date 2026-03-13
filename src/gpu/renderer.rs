@@ -194,7 +194,8 @@ impl TerminalRenderer {
             encoder.setFragmentTexture_atIndex(Some(self.atlas.texture()), 0);
         }
 
-        let instance_count = (grid_cols as usize) * (grid_rows as usize);
+        let instance_count =
+            ((grid_cols as usize) * (grid_rows as usize)).min(self.ctx.cell_capacity);
         unsafe {
             encoder.drawPrimitives_vertexStart_vertexCount_instanceCount(
                 MTLPrimitiveType::Triangle,
@@ -219,7 +220,8 @@ impl TerminalRenderer {
                 );
             }
 
-            let sidebar_instances = (sidebar_cols as usize) * (sidebar_rows as usize);
+            let sidebar_instances =
+                ((sidebar_cols as usize) * (sidebar_rows as usize)).min(self.ctx.sidebar_cell_capacity);
             unsafe {
                 encoder.drawPrimitives_vertexStart_vertexCount_instanceCount(
                     MTLPrimitiveType::Triangle,

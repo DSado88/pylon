@@ -170,12 +170,12 @@ impl GlyphAtlas {
         }
     }
 
-    /// Draw box-drawing characters (U+2500–U+257F) as pixel-perfect geometric
-    /// primitives. Returns Some(pixels) if handled, None to fall through to
-    /// Core Text rasterization.
+    /// Draw box-drawing characters (U+2500–U+259F) and block elements as
+    /// pixel-perfect geometric primitives. Returns Some(pixels) if handled,
+    /// None to fall through to Core Text rasterization.
     fn rasterize_box_drawing(&self, ch: char) -> Option<Vec<u8>> {
         let code = ch as u32;
-        if !(0x2500..=0x257F).contains(&code) {
+        if !(0x2500..=0x259F).contains(&code) {
             return None;
         }
 
@@ -417,7 +417,186 @@ impl GlyphAtlas {
                     }
                 }
             }
-            // For any unhandled box-drawing char, fall through to Core Text
+            // ▔ upper 1/8 block
+            0x2594 => {
+                let eighth = h / 8;
+                hline(0, eighth.max(1), 0, w);
+            }
+            // ▕ right 1/8 block
+            0x2595 => {
+                let eighth = w / 8;
+                hline(0, h, w.saturating_sub(eighth.max(1)), w);
+            }
+            // ▖ quadrant lower left
+            0x2596 => {
+                hline(cy, h, 0, cx);
+            }
+            // ▗ quadrant lower right
+            0x2597 => {
+                hline(cy, h, cx, w);
+            }
+            // ▘ quadrant upper left
+            0x2598 => {
+                hline(0, cy, 0, cx);
+            }
+            // ▙ quadrant upper left + lower left + lower right
+            0x2599 => {
+                hline(0, cy, 0, cx);
+                hline(cy, h, 0, w);
+            }
+            // ▚ quadrant upper left + lower right
+            0x259A => {
+                hline(0, cy, 0, cx);
+                hline(cy, h, cx, w);
+            }
+            // ▛ quadrant upper left + upper right + lower left
+            0x259B => {
+                hline(0, cy, 0, w);
+                hline(cy, h, 0, cx);
+            }
+            // ▜ quadrant upper left + upper right + lower right
+            0x259C => {
+                hline(0, cy, 0, w);
+                hline(cy, h, cx, w);
+            }
+            // ▝ quadrant upper right
+            0x259D => {
+                hline(0, cy, cx, w);
+            }
+            // ▞ quadrant upper right + lower left
+            0x259E => {
+                hline(0, cy, cx, w);
+                hline(cy, h, 0, cx);
+            }
+            // ▟ quadrant upper right + lower left + lower right
+            0x259F => {
+                hline(0, cy, cx, w);
+                hline(cy, h, 0, w);
+            }
+            // ▁ lower 1/8 block
+            0x2581 => {
+                let eighth = h / 8;
+                hline(h.saturating_sub(eighth.max(1)), h, 0, w);
+            }
+            // ▂ lower 1/4 block
+            0x2582 => {
+                hline(h * 3 / 4, h, 0, w);
+            }
+            // ▃ lower 3/8 block
+            0x2583 => {
+                hline(h * 5 / 8, h, 0, w);
+            }
+            // ▅ lower 5/8 block
+            0x2585 => {
+                hline(h * 3 / 8, h, 0, w);
+            }
+            // ▆ lower 3/4 block
+            0x2586 => {
+                hline(h / 4, h, 0, w);
+            }
+            // ▇ lower 7/8 block
+            0x2587 => {
+                let eighth = h / 8;
+                hline(eighth.max(1), h, 0, w);
+            }
+            // ▉ left 7/8 block
+            0x2589 => {
+                let eighth = w / 8;
+                hline(0, h, 0, w.saturating_sub(eighth.max(1)));
+            }
+            // ▊ left 3/4 block
+            0x258A => {
+                hline(0, h, 0, w * 3 / 4);
+            }
+            // ▋ left 5/8 block
+            0x258B => {
+                hline(0, h, 0, w * 5 / 8);
+            }
+            // ▍ left 3/8 block
+            0x258D => {
+                hline(0, h, 0, w * 3 / 8);
+            }
+            // ▎ left 1/4 block
+            0x258E => {
+                hline(0, h, 0, w / 4);
+            }
+            // ▏ left 1/8 block
+            0x258F => {
+                hline(0, h, 0, (w / 8).max(1));
+            }
+            // ╭ rounded down and right (render as corner — at small sizes indistinguishable)
+            0x256D => {
+                hline(cy - half_thin, cy - half_thin + thin, cx, w); // right
+                hline(cy, h, cx - half_thin, cx - half_thin + thin); // down
+            }
+            // ╮ rounded down and left
+            0x256E => {
+                hline(cy - half_thin, cy - half_thin + thin, 0, cx + half_thin); // left
+                hline(cy, h, cx - half_thin, cx - half_thin + thin); // down
+            }
+            // ╯ rounded up and left
+            0x256F => {
+                hline(cy - half_thin, cy - half_thin + thin, 0, cx + half_thin); // left
+                hline(0, cy + half_thin, cx - half_thin, cx - half_thin + thin); // up
+            }
+            // ╰ rounded up and right
+            0x2570 => {
+                hline(cy - half_thin, cy - half_thin + thin, cx, w); // right
+                hline(0, cy + half_thin, cx - half_thin, cx - half_thin + thin); // up
+            }
+            // ╴ light left
+            0x2574 => {
+                hline(cy - half_thin, cy - half_thin + thin, 0, cx + half_thin);
+            }
+            // ╵ light up
+            0x2575 => {
+                hline(0, cy + half_thin, cx - half_thin, cx - half_thin + thin);
+            }
+            // ╶ light right
+            0x2576 => {
+                hline(cy - half_thin, cy - half_thin + thin, cx, w);
+            }
+            // ╷ light down
+            0x2577 => {
+                hline(cy, h, cx - half_thin, cx - half_thin + thin);
+            }
+            // ╸ heavy left
+            0x2578 => {
+                hline(cy - half_heavy, cy - half_heavy + heavy, 0, cx + half_heavy);
+            }
+            // ╹ heavy up
+            0x2579 => {
+                hline(0, cy + half_heavy, cx - half_heavy, cx - half_heavy + heavy);
+            }
+            // ╺ heavy right
+            0x257A => {
+                hline(cy - half_heavy, cy - half_heavy + heavy, cx, w);
+            }
+            // ╻ heavy down
+            0x257B => {
+                hline(cy, h, cx - half_heavy, cx - half_heavy + heavy);
+            }
+            // ╼ light left and heavy right
+            0x257C => {
+                hline(cy - half_thin, cy - half_thin + thin, 0, cx);
+                hline(cy - half_heavy, cy - half_heavy + heavy, cx, w);
+            }
+            // ╽ light up and heavy down
+            0x257D => {
+                hline(0, cy, cx - half_thin, cx - half_thin + thin);
+                hline(cy, h, cx - half_heavy, cx - half_heavy + heavy);
+            }
+            // ╾ heavy left and light right
+            0x257E => {
+                hline(cy - half_heavy, cy - half_heavy + heavy, 0, cx);
+                hline(cy - half_thin, cy - half_thin + thin, cx, w);
+            }
+            // ╿ heavy up and light down
+            0x257F => {
+                hline(0, cy, cx - half_heavy, cx - half_heavy + heavy);
+                hline(cy, h, cx - half_thin, cx - half_thin + thin);
+            }
+            // For any unhandled character in range, fall through to Core Text
             _ => return None,
         }
 

@@ -13,7 +13,7 @@ use crate::event_policy::{self, FrameResult};
 
 use crate::config::CockpitConfig;
 use crate::error::{CockpitError, Result};
-use crate::gpu::atlas::GlyphKey;
+use crate::gpu::atlas::{GlyphAtlas, GlyphKey};
 use crate::gpu::context::GpuCell;
 use crate::gpu::renderer::TerminalRenderer;
 use crate::gpu::window::CockpitWindow;
@@ -717,11 +717,19 @@ impl App {
             return;
         }
 
-        // Grow GPU buffer if needed — if this fails, skip the resize entirely
+        // Grow GPU buffers if needed — if this fails, skip the resize entirely
         // to avoid the grid having larger dimensions than the GPU buffer.
         if let Err(e) = tw.renderer.resize(new_cols as u32, new_rows as u32) {
             tracing::error!("Failed to resize GPU buffer: {e}");
             return;
+        }
+        if new_sidebar_cols > 0 {
+            if let Err(e) = tw
+                .renderer
+                .resize_sidebar(new_sidebar_cols as u32, new_rows as u32)
+            {
+                tracing::error!("Failed to resize sidebar GPU buffer: {e}");
+            }
         }
 
         tw.resize(new_cols, new_rows);
@@ -765,26 +773,27 @@ impl App {
 
         self.config.font_size = new_size;
 
-        // Recreate renderer for this window
+        // Rebuild only the glyph atlas — keep MetalContext (device, pipeline,
+        // buffers) intact to avoid buffer size/state mismatches.
         let (_, tw) = match self.windows.get_mut(window_idx) {
             Some(pair) => pair,
             None => return,
         };
 
-        let renderer = match TerminalRenderer::new(
-            tw.grid_cols as u32,
-            tw.grid_rows as u32,
+        let atlas = match GlyphAtlas::new(
+            &tw.renderer.ctx.device,
             &self.config.font_family,
             self.config.font_size,
+            1.2,
         ) {
-            Ok(r) => r,
+            Ok(a) => a,
             Err(e) => {
-                tracing::error!("Failed to recreate renderer: {e}");
+                tracing::error!("Failed to recreate glyph atlas: {e}");
                 return;
             }
         };
 
-        tw.renderer = renderer;
+        tw.renderer.atlas = atlas;
         tw.dirty_rows.mark_all();
         tw.sidebar_rendered_version = 0;
 
@@ -1506,6 +1515,8 @@ impl ApplicationHandler for App {
                                             self.last_sidebar_click_time = None;
                                             self.last_sidebar_click_tab = None;
                                             self.active_tab = tab_idx;
+                                            self.sidebar.dirty = true;
+                                            self.sidebar_version += 1;
                                             if let Some((_, tw)) =
                                                 self.windows.get_mut(tab_idx)
                                             {
@@ -1518,6 +1529,15 @@ impl ApplicationHandler for App {
                                         } else {
                                             self.last_sidebar_click_time = Some(now);
                                             self.last_sidebar_click_tab = Some(tab_idx);
+                                            // Switch to the clicked tab: update
+                                            // active_tab immediately for sidebar
+                                            // highlight, then tell macOS to switch
+                                            // the native tab.
+                                            if self.active_tab != tab_idx {
+                                                self.active_tab = tab_idx;
+                                                self.sidebar.dirty = true;
+                                                self.sidebar_version += 1;
+                                            }
                                             if let Some((_, tw)) = self.windows.get(idx)
                                             {
                                                 tw.cockpit_window
@@ -1557,13 +1577,59 @@ impl ApplicationHandler for App {
                                 if self.selecting {
                                     self.selecting = false;
                                     // If start == end (click without drag), clear selection
+                                    // and attempt click-to-position cursor movement.
                                     if let Some(ref sel) = self.selection {
                                         if sel.start_row == sel.end_row
                                             && sel.start_col == sel.end_col
                                         {
+                                            let click_row = sel.start_row;
+                                            let click_col = sel.start_col;
                                             self.selection = None;
                                             if let Some((_, tw)) = self.windows.get(idx) {
                                                 tw.dirty_rows.mark_all();
+                                                // Click-to-position: if not scrolled
+                                                // and click is on the cursor's row,
+                                                // emit arrow keys to reposition.
+                                                if tw.scroll_offset == 0 {
+                                                    let cursor_row =
+                                                        tw.vt_state.cursor.row as usize;
+                                                    let cursor_col =
+                                                        tw.vt_state.cursor.col as usize;
+                                                    if click_row == cursor_row
+                                                        && click_col != cursor_col
+                                                    {
+                                                        let app_cursor = tw
+                                                            .vt_state
+                                                            .application_cursor_keys;
+                                                        let (seq, count) =
+                                                            if click_col > cursor_col {
+                                                                let s: &[u8] = if app_cursor
+                                                                {
+                                                                    b"\x1bOC"
+                                                                } else {
+                                                                    b"\x1b[C"
+                                                                };
+                                                                (
+                                                                    s,
+                                                                    click_col - cursor_col,
+                                                                )
+                                                            } else {
+                                                                let s: &[u8] = if app_cursor
+                                                                {
+                                                                    b"\x1bOD"
+                                                                } else {
+                                                                    b"\x1b[D"
+                                                                };
+                                                                (
+                                                                    s,
+                                                                    cursor_col - click_col,
+                                                                )
+                                                            };
+                                                        for _ in 0..count {
+                                                            tw.write_pty(seq);
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }

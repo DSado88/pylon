@@ -32,6 +32,10 @@ impl CockpitWindow {
         // so windows always group as tabs regardless of system preferences.
         Self::set_tabbing_mode_preferred(&ns_view_ptr);
 
+        // Apply dark appearance and transparent titlebar to match terminal theme.
+        // SAFETY: ns_view_ptr is a valid AppKit NSView from winit's window handle.
+        unsafe { crate::titlebar::apply_dark_titlebar(&ns_view_ptr) };
+
         let raw_layer = unsafe { raw_window_metal::Layer::from_ns_view(ns_view_ptr) };
         let layer_ptr: *mut CAMetalLayer = raw_layer.into_raw().as_ptr().cast();
         let metal_layer: Retained<CAMetalLayer> = unsafe {
@@ -41,6 +45,7 @@ impl CockpitWindow {
 
         metal_layer.setDevice(Some(device));
         metal_layer.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
+        metal_layer.setOpaque(true);
         metal_layer.setDisplaySyncEnabled(true);
         metal_layer.setFramebufferOnly(true);
         metal_layer.setContentsScale(window.scale_factor());
