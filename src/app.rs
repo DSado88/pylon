@@ -138,6 +138,8 @@ pub struct App {
     sessions_rx: Option<mpsc::UnboundedReceiver<Vec<discovery::TabScanResult>>>,
     pollers_started: bool,
     // Sidebar drag-to-resize state and cursor tracking
+    /// Cursor position in LOGICAL pixels (divided by scale on input).
+    /// All grid math (cell_w, cell_h, padding) is in logical pixels.
     cursor_x: f64,
     cursor_y: f64,
     dragging_sidebar: bool,
@@ -1458,8 +1460,12 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                self.cursor_x = position.x;
-                self.cursor_y = position.y;
+                // Store as logical pixels — all grid math is in logical space.
+                let cur_scale = self.windows.get(idx)
+                    .map(|(_, tw)| tw.cockpit_window.window.scale_factor())
+                    .unwrap_or(1.0);
+                self.cursor_x = position.x / cur_scale;
+                self.cursor_y = position.y / cur_scale;
 
                 // Update text selection while dragging
                 if self.selecting {
@@ -1503,17 +1509,19 @@ impl ApplicationHandler for App {
                 } else if self.sidebar.visible {
                     if let Some((_, tw)) = self.windows.get(idx) {
                         self.cursor_hover_window = Some(idx);
-                        let width = tw.cockpit_window.window.inner_size().width;
-                        let sb_phys = (tw.sidebar_width as f64 * tw.cockpit_window.window.scale_factor()).round() as u32;
-                        let edge_x = width.saturating_sub(sb_phys) as f64;
-                        if (position.x - edge_x).abs() < 5.0 {
+                        // All in logical pixels (cursor_x/y are logical)
+                        let logical_w = tw.cockpit_window.window.inner_size().width as f64
+                            / tw.cockpit_window.window.scale_factor();
+                        let edge_x = logical_w - tw.sidebar_width as f64;
+                        if (self.cursor_x - edge_x).abs() < 5.0 {
                             tw.cockpit_window.window.set_cursor(CursorIcon::ColResize);
-                        } else if position.x > edge_x {
+                        } else if self.cursor_x > edge_x {
                             // Inside sidebar — detect hover over session cards
                             tw.cockpit_window.window.set_cursor(CursorIcon::Pointer);
                             let cell_h = tw.renderer.atlas.cell_height as f64;
                             if cell_h > 0.0 {
-                                let sidebar_row = ((position.y - self.config.terminal_padding as f64).max(0.0) / cell_h) as u16;
+                                // cursor_y and cell_h are both logical
+                                let sidebar_row = ((self.cursor_y - self.config.terminal_padding as f64).max(0.0) / cell_h) as u16;
                                 let new_hovered = self
                                     .sidebar
                                     .hit_map
@@ -1559,9 +1567,10 @@ impl ApplicationHandler for App {
                         (width, cell_h, cell_w, scale, cols, rows, sb_width)
                     });
                     if let Some((width, cell_h, cell_w, scale, cols, rows, sb_width)) = win_info {
-                        let sb_phys = (sb_width as f64 * scale).round() as u32;
+                        // edge_x in logical pixels (cursor is logical too)
+                        let logical_w = width as f64 / scale;
                         let edge_x = if self.sidebar.visible {
-                            width.saturating_sub(sb_phys) as f64
+                            logical_w - sb_width as f64
                         } else {
                             width as f64
                         };
@@ -1576,6 +1585,7 @@ impl ApplicationHandler for App {
                                 // Click inside sidebar — switch to hovered tab,
                                 // double-click enters rename mode.
                                 if cell_h > 0.0 {
+                                    // cursor_y is already logical, cell_h is logical
                                     let sidebar_row = ((self.cursor_y - self.config.terminal_padding as f64).max(0.0) / cell_h) as u16;
                                     let clicked_tab = self
                                         .sidebar
@@ -1648,9 +1658,10 @@ impl ApplicationHandler for App {
                             }
                             ElementState::Pressed => {
                                 // Click in terminal area — start text selection
+                                // pixel_to_grid expects physical pixels
                                 let (row, col) = pixel_to_grid(
-                                    self.cursor_x,
-                                    self.cursor_y,
+                                    self.cursor_x * scale,
+                                    self.cursor_y * scale,
                                     cell_w,
                                     cell_h as f32,
                                     self.config.terminal_padding,
@@ -1751,10 +1762,11 @@ impl ApplicationHandler for App {
                 };
 
                 // Check if cursor is in the sidebar area
+                // cursor_x is logical, compute edge_x in logical too
                 let in_sidebar = self.sidebar.visible && self.windows.get(idx).is_some_and(|(_, tw)| {
-                    let width = tw.cockpit_window.window.inner_size().width;
-                    let sb_phys = (tw.sidebar_width as f64 * tw.cockpit_window.window.scale_factor()).round() as u32;
-                    let edge_x = width.saturating_sub(sb_phys) as f64;
+                    let logical_w = tw.cockpit_window.window.inner_size().width as f64
+                        / tw.cockpit_window.window.scale_factor();
+                    let edge_x = logical_w - tw.sidebar_width as f64;
                     self.cursor_x > edge_x
                 });
 
