@@ -145,6 +145,12 @@ impl PtyHandle {
                 // unsetenv is async-signal-safe.
                 unsafe { libc::unsetenv(claudecode_env.as_ptr()) };
 
+                // Set TERM so the shell uses correct escape sequences.
+                // setenv is async-signal-safe on macOS.
+                let term_name = c"TERM";
+                let term_val = c"xterm-256color";
+                unsafe { libc::setenv(term_name.as_ptr(), term_val.as_ptr(), 1) };
+
                 // execvp replaces the process; if it returns, it failed
                 let _ = execvp(&c_shell, &[login_name]);
                 unsafe { libc::_exit(1) }
