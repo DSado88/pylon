@@ -36,7 +36,8 @@ pub fn find_claude_child(shell_pid: u32) -> Option<(u32, String)> {
 
 /// Extract the session UUID for a running claude process.
 /// Tries: (1) `--resume <UUID>` from command line,
-/// (2) JSONL whose birth time best matches the process start time.
+/// (2) UUID from open file paths via lsof,
+/// (3) JSONL whose birth time best matches the process start time.
 pub fn extract_session_id(pid: u32) -> Option<String> {
     let output = Command::new("ps")
         .args(["-p", &pid.to_string(), "-o", "command="])
@@ -45,12 +46,47 @@ pub fn extract_session_id(pid: u32) -> Option<String> {
 
     let cmd = String::from_utf8_lossy(&output.stdout).to_string();
 
+    // Method 1: --resume UUID from command line
     if let Some(uuid) = extract_resume_uuid(&cmd) {
         return Some(uuid);
     }
 
+    // Method 2: UUID from open file paths (lsof)
+    if let Some(uuid) = session_id_from_lsof(pid) {
+        return Some(uuid);
+    }
+
+    // Method 3: Birthtime matching (least reliable, fallback)
     let start_time = get_process_start_time(pid)?;
     session_id_from_birthtime(pid, start_time)
+}
+
+/// Extract session UUID from a Claude process's open file descriptors.
+/// Claude keeps `.claude/projects/<key>/<uuid>.jsonl` or
+/// `.claude/tasks/<uuid>` directories open.
+fn session_id_from_lsof(pid: u32) -> Option<String> {
+    let output = Command::new("lsof")
+        .args(["-p", &pid.to_string(), "-Fn"])
+        .output()
+        .ok()?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    for line in stdout.lines() {
+        let path = line.strip_prefix('n').unwrap_or(line);
+        if !path.contains("/.claude/") {
+            continue;
+        }
+        // Look for UUID in path segments
+        for segment in path.rsplit('/') {
+            // Strip .jsonl extension if present
+            let name = segment.strip_suffix(".jsonl").unwrap_or(segment);
+            if name.len() == 36 && is_uuid(name) {
+                return Some(name.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// Get a process's start time as a SystemTime via `ps -o lstart=`.
