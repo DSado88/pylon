@@ -61,6 +61,9 @@ impl PtyHandle {
         let base_name = shell.rsplit('/').next().unwrap_or("zsh");
         let login_name = CString::new(format!("-{base_name}"))
             .map_err(|e| CockpitError::Pty(format!("invalid login name: {e}")))?;
+        // Pre-allocate env var name for unsetenv in child
+        let claudecode_env = CString::new("CLAUDECODE")
+            .map_err(|e| CockpitError::Pty(format!("env var name: {e}")))?;
 
         // SAFETY: fork() is unsafe because child must not use non-async-signal-safe
         // functions before exec. The child below only calls setsid, ioctl, dup2,
@@ -102,6 +105,10 @@ impl PtyHandle {
                 }
                 // Prevent OwnedFd from double-closing
                 std::mem::forget(slave_fd);
+
+                // Unset CLAUDECODE so Claude Code can launch inside this terminal.
+                // unsetenv is async-signal-safe.
+                unsafe { libc::unsetenv(claudecode_env.as_ptr()) };
 
                 // execvp replaces the process; if it returns, it failed
                 let _ = execvp(&c_shell, &[login_name]);

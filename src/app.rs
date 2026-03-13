@@ -4,15 +4,16 @@ use std::time::Duration;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
-use winit::keyboard::{Key, NamedKey};
+use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{WindowAttributes, WindowId};
 
 use crate::config::CockpitConfig;
 use crate::error::{CockpitError, Result};
+use crate::gpu::atlas::GlyphKey;
 use crate::gpu::context::GpuCell;
 use crate::gpu::renderer::TerminalRenderer;
 use crate::gpu::window::CockpitWindow;
-use crate::grid::cell::{Color, NamedColor};
+use crate::grid::cell::{CellFlags, Color, NamedColor};
 use crate::grid::storage::{Grid, SharedGrid};
 use crate::primitives::DirtyRows;
 use crate::pty::reader::PtyReader;
@@ -35,6 +36,7 @@ pub struct App {
     vt_state: Option<TerminalState>,
     sidebar: SidebarState,
     config: CockpitConfig,
+    modifiers: ModifiersState,
     grid_cols: u16,
     grid_rows: u16,
 }
@@ -60,6 +62,7 @@ impl App {
             vt_state: None,
             sidebar,
             config,
+            modifiers: ModifiersState::empty(),
             grid_cols: DEFAULT_COLS,
             grid_rows: DEFAULT_ROWS,
         }
@@ -105,7 +108,7 @@ impl App {
     }
 
     fn render_frame(&mut self) -> Result<()> {
-        let renderer = match self.renderer.as_ref() {
+        let renderer = match self.renderer.as_mut() {
             Some(r) => r,
             None => return Ok(()),
         };
@@ -127,6 +130,9 @@ impl App {
         // Update uniforms
         let size = cockpit_window.window.inner_size();
         renderer.update_uniforms(cols, rows, size.width as f32, size.height as f32);
+
+        let atlas_w = renderer.atlas.atlas_width();
+        let atlas_h = renderer.atlas.atlas_height();
 
         // [I9] Only write dirty rows to the GPU buffer, not the entire grid.
         let grid = self
@@ -155,21 +161,36 @@ impl App {
                     }
                     let gpu_cell = match grid.cell(row_idx, col_idx) {
                         Some(cell) => {
-                            let glyph_index = cell.ch as u32;
-                            let fg = self.resolve_color(&cell.fg, true);
-                            let bg = self.resolve_color(&cell.bg, false);
+                            let fg = resolve_color(&self.config.colors,&cell.fg, true);
+                            let bg = resolve_color(&self.config.colors,&cell.bg, false);
                             let flags = cell.flags.bits() as u32;
+
+                            // Look up glyph in atlas, rasterizing on demand
+                            let glyph_key = GlyphKey {
+                                ch: cell.ch,
+                                bold: cell.flags.contains(CellFlags::BOLD),
+                                italic: cell.flags.contains(CellFlags::ITALIC),
+                            };
+                            let (uv_x, uv_y, uv_w, uv_h) =
+                                match renderer.atlas.get_or_insert(glyph_key) {
+                                    Ok(entry) => (
+                                        entry.x as f32 / atlas_w,
+                                        entry.y as f32 / atlas_h,
+                                        entry.width as f32 / atlas_w,
+                                        entry.height as f32 / atlas_h,
+                                    ),
+                                    Err(_) => (0.0, 0.0, 0.0, 0.0),
+                                };
+
                             GpuCell {
-                                glyph_index,
+                                glyph_index: cell.ch as u32,
                                 fg_color: fg,
                                 bg_color: bg,
                                 flags,
-                                // Atlas UVs are zero until glyph rasterization
-                                // populates them via get_or_insert().
-                                atlas_uv_x: 0.0,
-                                atlas_uv_y: 0.0,
-                                atlas_uv_w: 0.0,
-                                atlas_uv_h: 0.0,
+                                atlas_uv_x: uv_x,
+                                atlas_uv_y: uv_y,
+                                atlas_uv_w: uv_w,
+                                atlas_uv_h: uv_h,
                             }
                         }
                         None => GpuCell::default(),
@@ -204,72 +225,43 @@ impl App {
         )
     }
 
-    fn resolve_color(&self, color: &Color, is_fg: bool) -> [f32; 4] {
-        match color {
-            Color::Default => {
-                if is_fg {
-                    self.config.colors.foreground
-                } else {
-                    self.config.colors.background
-                }
+    fn adjust_font_size(&mut self, delta: f32) {
+        const DEFAULT_SIZE: f32 = 14.0;
+        const MIN_SIZE: f32 = 8.0;
+        const MAX_SIZE: f32 = 72.0;
+
+        let new_size = if delta == 0.0 {
+            DEFAULT_SIZE
+        } else {
+            (self.config.font_size + delta).clamp(MIN_SIZE, MAX_SIZE)
+        };
+
+        if (new_size - self.config.font_size).abs() < 0.01 {
+            return;
+        }
+
+        self.config.font_size = new_size;
+
+        // Recreate renderer with new font size
+        let renderer = match TerminalRenderer::new(
+            self.grid_cols as u32,
+            self.grid_rows as u32,
+            &self.config.font_family,
+            self.config.font_size,
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("Failed to recreate renderer: {e}");
+                return;
             }
-            Color::Named(named) => {
-                let idx = match named {
-                    NamedColor::Black => 0,
-                    NamedColor::Red => 1,
-                    NamedColor::Green => 2,
-                    NamedColor::Yellow => 3,
-                    NamedColor::Blue => 4,
-                    NamedColor::Magenta => 5,
-                    NamedColor::Cyan => 6,
-                    NamedColor::White => 7,
-                    NamedColor::BrightBlack => 8,
-                    NamedColor::BrightRed => 9,
-                    NamedColor::BrightGreen => 10,
-                    NamedColor::BrightYellow => 11,
-                    NamedColor::BrightBlue => 12,
-                    NamedColor::BrightMagenta => 13,
-                    NamedColor::BrightCyan => 14,
-                    NamedColor::BrightWhite => 15,
-                };
-                self.config
-                    .colors
-                    .ansi
-                    .get(idx)
-                    .copied()
-                    .unwrap_or(self.config.colors.foreground)
-            }
-            Color::Indexed(idx) => {
-                if (*idx as usize) < 16 {
-                    self.config
-                        .colors
-                        .ansi
-                        .get(*idx as usize)
-                        .copied()
-                        .unwrap_or(self.config.colors.foreground)
-                } else {
-                    // 256-color: compute approximate RGB
-                    let c = *idx;
-                    if c < 232 {
-                        // 6x6x6 color cube (indices 16-231)
-                        let c = c - 16;
-                        let r = c / 36;
-                        let g = (c % 36) / 6;
-                        let b = c % 6;
-                        [
-                            if r == 0 { 0.0 } else { (55.0 + 40.0 * r as f32) / 255.0 },
-                            if g == 0 { 0.0 } else { (55.0 + 40.0 * g as f32) / 255.0 },
-                            if b == 0 { 0.0 } else { (55.0 + 40.0 * b as f32) / 255.0 },
-                            1.0,
-                        ]
-                    } else {
-                        // Grayscale ramp (indices 232-255)
-                        let v = (8.0 + 10.0 * (c - 232) as f32) / 255.0;
-                        [v, v, v, 1.0]
-                    }
-                }
-            }
-            Color::Rgb(r, g, b) => [*r as f32 / 255.0, *g as f32 / 255.0, *b as f32 / 255.0, 1.0],
+        };
+
+        self.renderer = Some(renderer);
+
+        // Recalculate grid from new cell size
+        if let Some(ref w) = self.window {
+            let size = w.window.inner_size();
+            self.handle_resize(size.width, size.height);
         }
     }
 
@@ -333,6 +325,70 @@ impl App {
     }
 }
 
+fn resolve_color(colors: &crate::config::ColorScheme, color: &Color, is_fg: bool) -> [f32; 4] {
+    match color {
+        Color::Default => {
+            if is_fg {
+                colors.foreground
+            } else {
+                colors.background
+            }
+        }
+        Color::Named(named) => {
+            let idx = match named {
+                NamedColor::Black => 0,
+                NamedColor::Red => 1,
+                NamedColor::Green => 2,
+                NamedColor::Yellow => 3,
+                NamedColor::Blue => 4,
+                NamedColor::Magenta => 5,
+                NamedColor::Cyan => 6,
+                NamedColor::White => 7,
+                NamedColor::BrightBlack => 8,
+                NamedColor::BrightRed => 9,
+                NamedColor::BrightGreen => 10,
+                NamedColor::BrightYellow => 11,
+                NamedColor::BrightBlue => 12,
+                NamedColor::BrightMagenta => 13,
+                NamedColor::BrightCyan => 14,
+                NamedColor::BrightWhite => 15,
+            };
+            colors
+                .ansi
+                .get(idx)
+                .copied()
+                .unwrap_or(colors.foreground)
+        }
+        Color::Indexed(idx) => {
+            if (*idx as usize) < 16 {
+                colors
+                    .ansi
+                    .get(*idx as usize)
+                    .copied()
+                    .unwrap_or(colors.foreground)
+            } else {
+                let c = *idx;
+                if c < 232 {
+                    let c = c - 16;
+                    let r = c / 36;
+                    let g = (c % 36) / 6;
+                    let b = c % 6;
+                    [
+                        if r == 0 { 0.0 } else { (55.0 + 40.0 * r as f32) / 255.0 },
+                        if g == 0 { 0.0 } else { (55.0 + 40.0 * g as f32) / 255.0 },
+                        if b == 0 { 0.0 } else { (55.0 + 40.0 * b as f32) / 255.0 },
+                        1.0,
+                    ]
+                } else {
+                    let v = (8.0 + 10.0 * (c - 232) as f32) / 255.0;
+                    [v, v, v, 1.0]
+                }
+            }
+        }
+        Color::Rgb(r, g, b) => [*r as f32 / 255.0, *g as f32 / 255.0, *b as f32 / 255.0, 1.0],
+    }
+}
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
@@ -352,7 +408,12 @@ impl ApplicationHandler for App {
             }
         };
 
-        let renderer = match TerminalRenderer::new(self.grid_cols as u32, self.grid_rows as u32) {
+        let renderer = match TerminalRenderer::new(
+            self.grid_cols as u32,
+            self.grid_rows as u32,
+            &self.config.font_family,
+            self.config.font_size,
+        ) {
             Ok(r) => r,
             Err(e) => {
                 tracing::error!("Failed to create renderer: {e}");
@@ -432,9 +493,33 @@ impl ApplicationHandler for App {
             WindowEvent::Resized(size) => {
                 self.handle_resize(size.width, size.height);
             }
+            WindowEvent::ModifiersChanged(new_mods) => {
+                self.modifiers = new_mods.state();
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state != ElementState::Pressed {
                     return;
+                }
+
+                let super_key = self.modifiers.super_key();
+
+                // Cmd+Plus / Cmd+Minus / Cmd+0 for font scaling
+                if super_key {
+                    match &event.logical_key {
+                        Key::Character(s) if s.as_str() == "+" || s.as_str() == "=" => {
+                            self.adjust_font_size(2.0);
+                            return;
+                        }
+                        Key::Character(s) if s.as_str() == "-" => {
+                            self.adjust_font_size(-2.0);
+                            return;
+                        }
+                        Key::Character(s) if s.as_str() == "0" => {
+                            self.adjust_font_size(0.0); // reset to default
+                            return;
+                        }
+                        _ => {}
+                    }
                 }
 
                 let bytes: Option<Vec<u8>> = match &event.logical_key {
@@ -483,6 +568,7 @@ impl ApplicationHandler for App {
 
 fn named_key_bytes(key: &NamedKey, app_cursor: bool) -> Option<Vec<u8>> {
     let bytes: &[u8] = match key {
+        NamedKey::Space => b" ",
         NamedKey::Enter => b"\r",
         NamedKey::Tab => b"\t",
         NamedKey::Backspace => b"\x7f",

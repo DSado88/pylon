@@ -17,9 +17,14 @@ pub struct TerminalRenderer {
 }
 
 impl TerminalRenderer {
-    pub fn new(grid_cols: u32, grid_rows: u32) -> Result<Self> {
+    pub fn new(
+        grid_cols: u32,
+        grid_rows: u32,
+        font_family: &str,
+        font_size: f32,
+    ) -> Result<Self> {
         let ctx = MetalContext::new(grid_cols, grid_rows)?;
-        let atlas = GlyphAtlas::new(&ctx.device)?;
+        let atlas = GlyphAtlas::new(&ctx.device, font_family, font_size)?;
         Ok(Self { ctx, atlas })
     }
 

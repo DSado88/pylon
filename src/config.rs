@@ -18,7 +18,7 @@ pub struct ColorScheme {
 impl Default for CockpitConfig {
     fn default() -> Self {
         Self {
-            font_family: String::from("JetBrains Mono"),
+            font_family: String::from("Menlo"),
             font_size: 14.0,
             scrollback_lines: 10_000,
             sidebar_width: 280,
