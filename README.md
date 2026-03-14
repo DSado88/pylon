@@ -4,7 +4,7 @@ A Metal-accelerated terminal emulator built for Claude Code. Track sessions, mon
 
 ## Why Pylon?
 
-If you use Claude Code heavily, you know the pain: multiple terminal windows, one for each session, with no way to see which is doing what. A separate TUI to check your token usage. Another tool to track active sessions. Tab-switching chaos.
+If you use Claude Code heavily, you know the pain: multiple terminal windows, one for each session, with no way to see which is doing what. A [separate TUI to check your token usage](https://github.com/DSado88/claude-tracker). [Another tool to track active sessions](https://github.com/DSado88/claude-sessions). Tab-switching chaos.
 
 Pylon puts it all in one place. A fast terminal with a built-in side panel that shows your active Claude sessions and real-time API usage across all your accounts. Click a session to jump to it. See at a glance who's working, who's idle, and how much capacity you have left.
 
