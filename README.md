@@ -120,6 +120,16 @@ Pylon is written in Rust with these key components:
 
 The terminal grid uses a dirty-row bitfield to minimize GPU uploads — only changed rows are re-written each frame. Scrollback is stored in a ring buffer with configurable capacity (default 10,000 lines).
 
+## Related Tools
+
+Pylon integrates functionality from two standalone TUIs that I built and maintain separately. If you want focused, stable tools instead of the all-in-one approach:
+
+- **[claude-tracker](https://github.com/DSado88/claude-tracker)** — Rust/ratatui TUI for monitoring Claude API usage across multiple accounts. OAuth login, token refresh, color-coded progress bars, live countdown timers. Stable and production-ready.
+
+- **[claude-sessions](https://github.com/DSado88/claude-sessions)** — Python/Textual TUI for tracking active Claude Code sessions. Process discovery, window matching, AI-generated topic summaries via Apple Intelligence, session history in SQLite. Stable and production-ready.
+
+Pylon combines both into a single terminal with a side panel, but the standalone tools are more mature and feature-complete if you just need one or the other.
+
 ## License
 
 MIT
