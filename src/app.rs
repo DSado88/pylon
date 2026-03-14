@@ -110,6 +110,9 @@ impl TerminalWindow {
         self.vt_state.scroll_region = (0, rows);
         self.vt_state.clamp_cursor(rows, cols);
         let _ = self.pty.resize(PtySize::new(cols, rows));
+        // Snap to live on resize — scrollback indices become invalid
+        // when grid dimensions change.
+        self.scroll_offset = 0;
         self.dirty_rows.mark_all();
         self.grid_cols = cols;
         self.grid_rows = rows;
@@ -287,7 +290,7 @@ impl App {
     ) -> Result<(WindowId, TerminalWindow)> {
         let attrs = WindowAttributes::default()
             .with_title("Claude Cockpit")
-            .with_inner_size(winit::dpi::LogicalSize::new(1680.0, 1050.0))
+            .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 800.0))
             .with_tabbing_identifier(TABBING_ID);
 
         let window = event_loop
