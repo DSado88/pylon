@@ -297,11 +297,13 @@ impl App {
             .create_window(attrs)
             .map_err(|e| CockpitError::Render(format!("create window: {e}")))?;
 
-        let renderer = TerminalRenderer::new(
+        let win_scale = window.scale_factor() as f32;
+        let renderer = TerminalRenderer::new_with_scale(
             DEFAULT_COLS as u32,
             DEFAULT_ROWS as u32,
             &self.config.font_family,
             self.config.font_size,
+            win_scale,
         )?;
 
         let cockpit_window = CockpitWindow::from_window(window, &renderer.ctx.device)?;
@@ -872,11 +874,13 @@ impl App {
             None => return,
         };
 
-        let atlas = match GlyphAtlas::new(
+        let scale = tw.cockpit_window.window.scale_factor() as f32;
+        let atlas = match GlyphAtlas::new_with_scale(
             &tw.renderer.ctx.device,
             &self.config.font_family,
             self.config.font_size,
             1.2,
+            scale,
         ) {
             Ok(a) => a,
             Err(e) => {

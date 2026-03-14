@@ -26,8 +26,18 @@ impl TerminalRenderer {
         font_family: &str,
         font_size: f32,
     ) -> Result<Self> {
+        Self::new_with_scale(grid_cols, grid_rows, font_family, font_size, 1.0)
+    }
+
+    pub fn new_with_scale(
+        grid_cols: u32,
+        grid_rows: u32,
+        font_family: &str,
+        font_size: f32,
+        scale_factor: f32,
+    ) -> Result<Self> {
         let ctx = MetalContext::new(grid_cols, grid_rows)?;
-        let atlas = GlyphAtlas::new(&ctx.device, font_family, font_size, 1.2)?;
+        let atlas = GlyphAtlas::new_with_scale(&ctx.device, font_family, font_size, 1.2, scale_factor)?;
         Ok(Self {
             ctx,
             atlas,

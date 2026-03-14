@@ -58,7 +58,19 @@ impl GlyphAtlas {
         font_size: f32,
         line_height_factor: f32,
     ) -> Result<Self> {
-        let font = ct_new_from_name(font_family, font_size as f64)
+        Self::new_with_scale(device, font_family, font_size, line_height_factor, 1.0)
+    }
+
+    pub fn new_with_scale(
+        device: &ProtocolObject<dyn MTLDevice>,
+        font_family: &str,
+        font_size: f32,
+        line_height_factor: f32,
+        scale_factor: f32,
+    ) -> Result<Self> {
+        // Rasterize at the physical pixel size for Retina crispness
+        let raster_size = font_size * scale_factor;
+        let font = ct_new_from_name(font_family, raster_size as f64)
             .map_err(|()| CockpitError::Glyph(format!("font not found: {font_family}")))?;
 
         // Derive bold and italic variants
@@ -67,23 +79,26 @@ impl GlyphAtlas {
 
         let font_bold = font
             .clone_with_symbolic_traits(bold_trait, bold_trait)
-            .unwrap_or_else(|| font.clone_with_font_size(font_size as f64));
+            .unwrap_or_else(|| font.clone_with_font_size(raster_size as f64));
 
         let font_italic = font
             .clone_with_symbolic_traits(italic_trait, italic_trait)
-            .unwrap_or_else(|| font.clone_with_font_size(font_size as f64));
+            .unwrap_or_else(|| font.clone_with_font_size(raster_size as f64));
 
-        // Compute cell dimensions from font metrics
+        // Compute cell dimensions from font metrics at RASTER size
         let ascent = font.ascent();
         let descent = font.descent();
         let leading = font.leading();
-        let cell_height = (ascent + descent + leading).ceil() * line_height_factor as f64;
+        let raster_cell_height = (ascent + descent + leading).ceil() * line_height_factor as f64;
+        let raster_cell_width = Self::measure_advance(&font, '0');
 
-        // Cell width from advance of '0' (monospace representative)
-        let cell_width = Self::measure_advance(&font, '0');
+        // Cell dimensions in logical pixels (for grid layout)
+        let cell_width = (raster_cell_width / scale_factor as f64) as f32;
+        let cell_height = (raster_cell_height / scale_factor as f64) as f32;
 
-        let raster_width = cell_width.ceil() as usize;
-        let raster_height = cell_height.ceil() as usize;
+        // Raster dimensions in physical pixels (for atlas storage)
+        let raster_width = raster_cell_width.ceil() as usize;
+        let raster_height = raster_cell_height.ceil() as usize;
 
         // Create atlas texture
         let desc = unsafe {
