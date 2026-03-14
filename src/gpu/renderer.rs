@@ -14,6 +14,9 @@ use super::context::{GpuCell, MetalContext, Uniforms};
 pub struct TerminalRenderer {
     pub ctx: MetalContext,
     pub atlas: GlyphAtlas,
+    /// Last committed command buffer — waited on before next CPU write
+    /// to prevent GPU read/CPU write race on the shared cell buffer.
+    last_command_buffer: Option<objc2::rc::Retained<ProtocolObject<dyn MTLCommandBuffer>>>,
 }
 
 impl TerminalRenderer {
@@ -25,7 +28,11 @@ impl TerminalRenderer {
     ) -> Result<Self> {
         let ctx = MetalContext::new(grid_cols, grid_rows)?;
         let atlas = GlyphAtlas::new(&ctx.device, font_family, font_size, 1.2)?;
-        Ok(Self { ctx, atlas })
+        Ok(Self {
+            ctx,
+            atlas,
+            last_command_buffer: None,
+        })
     }
 
     pub fn resize(&mut self, grid_cols: u32, grid_rows: u32) -> Result<()> {
@@ -134,9 +141,18 @@ impl TerminalRenderer {
         }
     }
 
+    /// Wait for the previous frame's GPU work to finish.
+    /// Must be called before writing to cell buffers to prevent race conditions.
+    pub fn wait_for_previous_frame(&mut self) {
+        if let Some(ref cb) = self.last_command_buffer {
+            cb.waitUntilCompleted();
+        }
+        self.last_command_buffer = None;
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn render_frame(
-        &self,
+        &mut self,
         layer: &CAMetalLayer,
         grid_cols: u32,
         grid_rows: u32,
@@ -238,6 +254,10 @@ impl TerminalRenderer {
             ProtocolObject::from_ref(&*drawable);
         command_buffer.presentDrawable(drawable_ref);
         command_buffer.commit();
+
+        // Store for next frame's wait — prevents CPU writing to cell buffer
+        // while GPU is still reading it.
+        self.last_command_buffer = Some(command_buffer);
 
         Ok(())
     }

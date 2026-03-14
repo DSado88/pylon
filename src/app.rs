@@ -555,6 +555,9 @@ impl App {
         let pad = config.terminal_padding;
         renderer.update_uniforms(cols, rows, vp_w, vp_h, pad, pad);
 
+        // Wait for previous frame's GPU read to finish before writing new data
+        renderer.wait_for_previous_frame();
+
         // Write dirty terminal rows to GPU buffer
         if terminal_dirty {
             let grid = tw
