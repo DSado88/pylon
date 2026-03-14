@@ -620,7 +620,14 @@ impl App {
                                     atlas_uv_h: uv_h,
                                 }
                             }
-                            None => GpuCell::default(),
+                            None => {
+                                // Out-of-bounds (e.g. scrollback row narrower than
+                                // current grid) — use terminal background, not black.
+                                GpuCell {
+                                    bg_color: config.colors.background,
+                                    ..GpuCell::default()
+                                }
+                            }
                         };
 
                         // Block cursor: swap fg/bg at cursor position

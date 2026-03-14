@@ -69,6 +69,13 @@ impl ScrollbackBuffer {
     pub fn capacity(&self) -> usize {
         self.capacity
     }
+
+    /// Resize all rows in the scrollback to the new column count.
+    pub fn resize_cols(&mut self, new_cols: usize) {
+        for row in &mut self.buffer {
+            row.resize(new_cols);
+        }
+    }
 }
 
 /// The terminal grid: visible rows + scrollback.
@@ -201,10 +208,11 @@ impl Grid {
     }
 
     fn resize_inner(&mut self, new_rows: usize, new_cols: usize, preserve_scrollback: bool) {
-        // Resize existing rows' column count
+        // Resize existing rows AND scrollback to new column count
         for row in &mut self.rows {
             row.resize(new_cols);
         }
+        self.scrollback.resize_cols(new_cols);
 
         // Add or remove rows
         if new_rows > self.visible_rows {
