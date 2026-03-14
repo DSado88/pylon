@@ -1,0 +1,345 @@
+[
+  {
+    "finding_id": "30512f2b7e29ad4f",
+    "model_key": "qwen3-coder",
+    "severity": null,
+    "summary": "🔥 CRITICAL SAFETY ISSUES",
+    "body": "#### 1. **Use-After-Free in Titlebar Appearance Setting**\n**File:** `src/titlebar.rs`, lines 26-30\n```rust\nlet appearance: *const AnyObject =\n    msg_send![appearance_class, appearanceNamed: &*appearance_name];\nif !appearance.is_null() {\n    let _: () = msg_send![ns_window, setAppearance: appearance];\n}\n```\n\n**Issue:** The `appearance` object returned by `appearanceNamed:` is likely autoreleased. The code doesn't retain it, so it may be deallocated before `setAppearance:` is called, leading to a use-after-free crash.\n\n**Fix:** Retain the appearance object or use a retained wrapper:\n```rust\nlet appearance: Retained<AnyObject> = \n    msg_send![appearance_class, appearanceNamed: &*appearance_name];\nif !appearance.is_null() {\n    let _: () = msg_send![ns_window, setAppearance: &*appearance];\n}\n```\n\n#### 2. **Potential Memory Leak in Window Creation**\n**File:** `src/gpu/window.rs`, lines 38-43\n```rust\nlet raw_layer = unsafe { raw_window_metal::Layer::from_ns_view(ns_view_ptr) };\nlet layer_ptr: *mut CAMetalLayer = raw_layer.into_raw().as_ptr().cast();\nlet metal_layer: Retained<CAMetalLayer> = unsafe {\n    Retained::from_raw(layer_ptr)\n        .ok_or_else(|| CockpitError::Metal(\"null CAMetalLayer pointer\".into()))?\n};\n```\n\n**Issue:** The `raw_layer` is converted to a raw pointer but the original `raw_layer` object may still hold a reference, potentially causing double-free or use-after-free.\n\n**Fix:** Ensure proper ownership transfer or use the raw_window_metal API correctly according to its documentation.",
+    "file_path": "src/titlebar.rs`, lines 26-30"
+  },
+  {
+    "finding_id": "713c6d163fdcfa3b",
+    "model_key": "qwen3-coder",
+    "severity": null,
+    "summary": "Use-After-Free in Titlebar Appearance Setting",
+    "body": "**File:** `src/titlebar.rs`, lines 26-30\n```rust\nlet appearance: *const AnyObject =\n    msg_send![appearance_class, appearanceNamed: &*appearance_name];\nif !appearance.is_null() {\n    let _: () = msg_send![ns_window, setAppearance: appearance];\n}\n```\n\n**Issue:** The `appearance` object returned by `appearanceNamed:` is likely autoreleased. The code doesn't retain it, so it may be deallocated before `setAppearance:` is called, leading to a use-after-free crash.\n\n**Fix:** Retain the appearance object or use a retained wrapper:\n```rust\nlet appearance: Retained<AnyObject> = \n    msg_send![appearance_class, appearanceNamed: &*appearance_name];\nif !appearance.is_null() {\n    let _: () = msg_send![ns_window, setAppearance: &*appearance];\n}\n```",
+    "file_path": "src/titlebar.rs`, lines 26-30"
+  },
+  {
+    "finding_id": "adfd9657507c3711",
+    "model_key": "qwen3-coder",
+    "severity": null,
+    "summary": "Potential Memory Leak in Window Creation",
+    "body": "**File:** `src/gpu/window.rs`, lines 38-43\n```rust\nlet raw_layer = unsafe { raw_window_metal::Layer::from_ns_view(ns_view_ptr) };\nlet layer_ptr: *mut CAMetalLayer = raw_layer.into_raw().as_ptr().cast();\nlet metal_layer: Retained<CAMetalLayer> = unsafe {\n    Retained::from_raw(layer_ptr)\n        .ok_or_else(|| CockpitError::Metal(\"null CAMetalLayer pointer\".into()))?\n};\n```\n\n**Issue:** The `raw_layer` is converted to a raw pointer but the original `raw_layer` object may still hold a reference, potentially causing double-free or use-after-free.\n\n**Fix:** Ensure proper ownership transfer or use the raw_window_metal API correctly according to its documentation.",
+    "file_path": "src/gpu/window.rs`, lines 38-43"
+  },
+  {
+    "finding_id": "015b058f0b792c9f",
+    "model_key": "qwen3-coder",
+    "severity": null,
+    "summary": "⚠️ HIGH SEVERITY CORRECTNESS ISSUES",
+    "body": "#### 3. **Race Condition in Grid Access**\n**File:** `src/app.rs`, lines 499-502\n```rust\nlet grid = tw\n    .grid\n    .read()\n    .map_err(|e| CockpitError::Render(format!(\"grid lock poisoned: {e}\")))?;\n```\n\n**Issue:** The grid is locked for reading, but then individual cells are accessed in the rendering loop without maintaining the lock. If another thread writes to the grid during rendering, it could lead to inconsistent rendering or panics.\n\n**Fix:** Keep the grid read lock for the entire duration of the rendering operation that accesses grid data.\n\n#### 4. **Incorrect Scroll Offset Calculation**\n**File:** `src/grid/storage.rs`, lines 234-246\n```rust\nlet sb_start = sb_len.saturating_sub(scroll_offset);\nlet sb_row_idx = sb_start + row;\nif sb_row_idx < sb_len {\n    // This row is in scrollback\n    self.scrollback.get(sb_row_idx)?.get(col)\n} else {\n    // This row is in visible area\n    let visible_row = sb_row_idx - sb_len;\n    self.cell(visible_row, col)\n}\n```\n\n**Issue:** When scrolled, the calculation incorrectly assumes that scrollback rows come first, then visible rows. This can lead to out-of-bounds access or incorrect cell rendering.\n\n**Fix:** Correct the scroll offset calculation to properly map viewport rows to either scrollback or visible area:\n```rust\nif row < scroll_offset {\n    // Row is in scrollback\n    let sb_idx = sb_len.saturating_sub(scroll_offset) + row;\n    self.scrollback.get(sb_idx)?.get(col)\n} else {\n    // Row is in visible area\n    let visible_row = row - scroll_offset;\n    self.cell(visible_row, col)\n}\n```",
+    "file_path": "src/app.rs`, lines 499-502"
+  },
+  {
+    "finding_id": "42dd289f408e2f55",
+    "model_key": "qwen3-coder",
+    "severity": null,
+    "summary": "Race Condition in Grid Access",
+    "body": "**File:** `src/app.rs`, lines 499-502\n```rust\nlet grid = tw\n    .grid\n    .read()\n    .map_err(|e| CockpitError::Render(format!(\"grid lock poisoned: {e}\")))?;\n```\n\n**Issue:** The grid is locked for reading, but then individual cells are accessed in the rendering loop without maintaining the lock. If another thread writes to the grid during rendering, it could lead to inconsistent rendering or panics.\n\n**Fix:** Keep the grid read lock for the entire duration of the rendering operation that accesses grid data.",
+    "file_path": "src/app.rs`, lines 499-502"
+  },
+  {
+    "finding_id": "81c66102bdaba958",
+    "model_key": "qwen3-coder",
+    "severity": null,
+    "summary": "Incorrect Scroll Offset Calculation",
+    "body": "**File:** `src/grid/storage.rs`, lines 234-246\n```rust\nlet sb_start = sb_len.saturating_sub(scroll_offset);\nlet sb_row_idx = sb_start + row;\nif sb_row_idx < sb_len {\n    // This row is in scrollback\n    self.scrollback.get(sb_row_idx)?.get(col)\n} else {\n    // This row is in visible area\n    let visible_row = sb_row_idx - sb_len;\n    self.cell(visible_row, col)\n}\n```\n\n**Issue:** When scrolled, the calculation incorrectly assumes that scrollback rows come first, then visible rows. This can lead to out-of-bounds access or incorrect cell rendering.\n\n**Fix:** Correct the scroll offset calculation to properly map viewport rows to either scrollback or visible area:\n```rust\nif row < scroll_offset {\n    // Row is in scrollback\n    let sb_idx = sb_len.saturating_sub(scroll_offset) + row;\n    self.scrollback.get(sb_idx)?.get(col)\n} else {\n    // Row is in visible area\n    let visible_row = row - scroll_offset;\n    self.cell(visible_row, col)\n}\n```",
+    "file_path": "src/grid/storage.rs`, lines 234-246"
+  },
+  {
+    "finding_id": "dc95f2a81c7353e9",
+    "model_key": "qwen3-coder",
+    "severity": null,
+    "summary": "⚠️ MEDIUM SEVERITY UX ISSUES",
+    "body": "#### 5. **Sidebar Resize Jank**\n**File:** `src/app.rs`, lines 1403-1415\n```rust\nlet new_width = (size.width as f64 - position.x)\n    .max(100.0)\n    .min(size.width as f64 * 0.6) as u32;\nif new_width != self.config.sidebar_width {\n    self.config.sidebar_width = new_width;\n    // Resize all windows to reflect new sidebar width\n    for i in 0..self.windows.len() {\n        self.handle_resize_window(i);\n    }\n}\n```\n\n**Issue:** Resizing the sidebar triggers a resize operation on ALL windows, even those not being interacted with. This can cause performance issues and visual jank.\n\n**Fix:** Only resize the window being interacted with, or debounce the resize operations.\n\n#### 6. **Inconsistent Tab Switching Behavior**\n**File:** `src/app.rs`, lines 1278-1289\n```rust\n// Ctrl+Tab / Ctrl+Shift+Tab: next/prev tab (native macOS tab API)\nif self.modifiers.control_key() {\n    if let Key::Named(NamedKey::Tab) = &event.logical_key {\n        if let Some((_, tw)) = self.windows.get(idx) {\n            if shift_key {\n                tw.cockpit_window.window.select_previous_tab();\n            } else {\n                tw.cockpit_window.window.select_next_tab();\n            }\n        }\n        return;\n    }\n}\n```\n\n**Issue:** The code uses native macOS tab APIs but doesn't update the internal `active_tab` state, leading to inconsistent highlighting in the sidebar.\n\n**Fix:** Update `self.active_tab` to match the native tab selection:\n```rust\nif shift_key {\n    tw.cockpit_window.window.select_previous_tab();\n    if self.active_tab > 0 {\n        self.active_tab -= 1;\n    }\n} else {\n    tw.cockpit_window.window.select_next_tab();\n    if self.active_tab < self.windows.len() - 1 {\n        self.active_tab += 1;\n    }\n}\n```",
+    "file_path": "src/app.rs`, lines 1403-1415"
+  },
+  {
+    "finding_id": "192dfad14fc8fa4b",
+    "model_key": "qwen3-coder",
+    "severity": null,
+    "summary": "Sidebar Resize Jank",
+    "body": "**File:** `src/app.rs`, lines 1403-1415\n```rust\nlet new_width = (size.width as f64 - position.x)\n    .max(100.0)\n    .min(size.width as f64 * 0.6) as u32;\nif new_width != self.config.sidebar_width {\n    self.config.sidebar_width = new_width;\n    // Resize all windows to reflect new sidebar width\n    for i in 0..self.windows.len() {\n        self.handle_resize_window(i);\n    }\n}\n```\n\n**Issue:** Resizing the sidebar triggers a resize operation on ALL windows, even those not being interacted with. This can cause performance issues and visual jank.\n\n**Fix:** Only resize the window being interacted with, or debounce the resize operations.",
+    "file_path": "src/app.rs`, lines 1403-1415"
+  },
+  {
+    "finding_id": "9ae7878941989173",
+    "model_key": "qwen3-coder",
+    "severity": null,
+    "summary": "Inconsistent Tab Switching Behavior",
+    "body": "**File:** `src/app.rs`, lines 1278-1289\n```rust\n// Ctrl+Tab / Ctrl+Shift+Tab: next/prev tab (native macOS tab API)\nif self.modifiers.control_key() {\n    if let Key::Named(NamedKey::Tab) = &event.logical_key {\n        if let Some((_, tw)) = self.windows.get(idx) {\n            if shift_key {\n                tw.cockpit_window.window.select_previous_tab();\n            } else {\n                tw.cockpit_window.window.select_next_tab();\n            }\n        }\n        return;\n    }\n}\n```\n\n**Issue:** The code uses native macOS tab APIs but doesn't update the internal `active_tab` state, leading to inconsistent highlighting in the sidebar.\n\n**Fix:** Update `self.active_tab` to match the native tab selection:\n```rust\nif shift_key {\n    tw.cockpit_window.window.select_previous_tab();\n    if self.active_tab > 0 {\n        self.active_tab -= 1;\n    }\n} else {\n    tw.cockpit_window.window.select_next_tab();\n    if self.active_tab < self.windows.len() - 1 {\n        self.active_tab += 1;\n    }\n}\n```",
+    "file_path": "src/app.rs`, lines 1278-1289"
+  },
+  {
+    "finding_id": "d3dfda6da56f3e4e",
+    "model_key": "qwen3-coder",
+    "severity": null,
+    "summary": "⚠️ MEDIUM SEVERITY VISUAL ISSUES",
+    "body": "#### 7. **Color Contrast Issues in Sidebar**\n**File:** `src/sidebar/layout.rs`, lines 12-21\n```rust\nconst LABEL_FG: [f32; 4] = [0.475, 0.545, 0.560, 1.0]; // muted label text\nconst VALUE_FG: [f32; 4] = [0.870, 0.855, 0.790, 1.0]; // warm white\nconst DIM_FG: [f32; 4] = [0.310, 0.395, 0.420, 1.0]; // subdued info\n```\n\n**Issue:** The color contrast between `LABEL_FG` and `SIDEBAR_BG` may be insufficient for accessibility, especially at smaller font sizes.\n\n**Fix:** Verify contrast ratios meet WCAG 2.1 AA standards (at least 4.5:1 for normal text). Adjust colors if necessary:\n```rust\n// Increase contrast for better readability\nconst LABEL_FG: [f32; 4] = [0.550, 0.620, 0.635, 1.0]; // Lighter for better contrast\n```\n\n#### 8. **Inconsistent Padding in Sidebar Cards**\n**File:** `src/sidebar/layout.rs`, lines 24-27\n```rust\nconst PAD_LEFT: u16 = 2; // left margin inside sidebar\nconst PAD_RIGHT: u16 = 1; // right margin\nconst CARD_PAD_LEFT: u16 = 3; // indent inside cards\nconst CARD_PAD_INNER: u16 = 4; // indent for sub-content inside cards\n```\n\n**Issue:** The padding constants are inconsistent, leading to uneven visual spacing in sidebar cards.\n\n**Fix:** Use consistent increments for padding (e.g., multiples of 2 or 4):\n```rust\nconst PAD_LEFT: u16 = 2;\nconst PAD_RIGHT: u16 = 2;\nconst CARD_PAD_LEFT: u16 = 4;\nconst CARD_PAD_INNER: u16 = 6;\n```",
+    "file_path": "src/sidebar/layout.rs`, lines 12-21"
+  },
+  {
+    "finding_id": "2b2fbd04855af16f",
+    "model_key": "qwen3-coder",
+    "severity": null,
+    "summary": "Color Contrast Issues in Sidebar",
+    "body": "**File:** `src/sidebar/layout.rs`, lines 12-21\n```rust\nconst LABEL_FG: [f32; 4] = [0.475, 0.545, 0.560, 1.0]; // muted label text\nconst VALUE_FG: [f32; 4] = [0.870, 0.855, 0.790, 1.0]; // warm white\nconst DIM_FG: [f32; 4] = [0.310, 0.395, 0.420, 1.0]; // subdued info\n```\n\n**Issue:** The color contrast between `LABEL_FG` and `SIDEBAR_BG` may be insufficient for accessibility, especially at smaller font sizes.\n\n**Fix:** Verify contrast ratios meet WCAG 2.1 AA standards (at least 4.5:1 for normal text). Adjust colors if necessary:\n```rust\n// Increase contrast for better readability\nconst LABEL_FG: [f32; 4] = [0.550, 0.620, 0.635, 1.0]; // Lighter for better contrast\n```",
+    "file_path": "src/sidebar/layout.rs`, lines 12-21"
+  },
+  {
+    "finding_id": "595dbb9cf3daafcf",
+    "model_key": "qwen3-coder",
+    "severity": null,
+    "summary": "Inconsistent Padding in Sidebar Cards",
+    "body": "**File:** `src/sidebar/layout.rs`, lines 24-27\n```rust\nconst PAD_LEFT: u16 = 2; // left margin inside sidebar\nconst PAD_RIGHT: u16 = 1; // right margin\nconst CARD_PAD_LEFT: u16 = 3; // indent inside cards\nconst CARD_PAD_INNER: u16 = 4; // indent for sub-content inside cards\n```\n\n**Issue:** The padding constants are inconsistent, leading to uneven visual spacing in sidebar cards.\n\n**Fix:** Use consistent increments for padding (e.g., multiples of 2 or 4):\n```rust\nconst PAD_LEFT: u16 = 2;\nconst PAD_RIGHT: u16 = 2;\nconst CARD_PAD_LEFT: u16 = 4;\nconst CARD_PAD_INNER: u16 = 6;\n```",
+    "file_path": "src/sidebar/layout.rs`, lines 24-27"
+  },
+  {
+    "finding_id": "8ff4142c071b4bfb",
+    "model_key": "qwen3-coder",
+    "severity": null,
+    "summary": "🔧 PERFORMANCE CONSIDERATIONS",
+    "body": "#### 9. **Excessive GPU Buffer Resizing**\n**File:** `src/gpu/context.rs`, lines 154-163\n```rust\npub fn resize_if_needed(&mut self, grid_cols: u32, grid_rows: 32) -> Result<()> {\n    let needed = (grid_cols as usize) * (grid_rows as usize);\n    if needed <= self.cell_capacity {\n        return Ok(());\n    }\n    self.cell_buffer = Self::alloc_cell_buffer(&self.device, needed)?;\n    self.cell_capacity = needed;\n    Ok(())\n}\n```\n\n**Issue:** The buffer is reallocated on every size increase, which can be expensive. No mechanism for gradual growth or reuse.\n\n**Fix:** Implement a growth strategy that minimizes reallocations:\n```rust\nlet needed = (grid_cols as usize) * (grid_rows as usize);\nif needed <= self.cell_capacity {\n    return Ok(());\n}\n// Grow by at least 50% to reduce frequent reallocations\nlet new_capacity = (needed * 3 / 2).max(self.cell_capacity * 2);\nself.cell_buffer = Self::alloc_cell_buffer(&self.device, new_capacity)?;\nself.cell_capacity = new_capacity;\n```",
+    "file_path": "src/gpu/context.rs`, lines 154-163"
+  },
+  {
+    "finding_id": "dba32138d52e1aee",
+    "model_key": "qwen3-coder",
+    "severity": null,
+    "summary": "Excessive GPU Buffer Resizing",
+    "body": "**File:** `src/gpu/context.rs`, lines 154-163\n```rust\npub fn resize_if_needed(&mut self, grid_cols: u32, grid_rows: 32) -> Result<()> {\n    let needed = (grid_cols as usize) * (grid_rows as usize);\n    if needed <= self.cell_capacity {\n        return Ok(());\n    }\n    self.cell_buffer = Self::alloc_cell_buffer(&self.device, needed)?;\n    self.cell_capacity = needed;\n    Ok(())\n}\n```\n\n**Issue:** The buffer is reallocated on every size increase, which can be expensive. No mechanism for gradual growth or reuse.\n\n**Fix:** Implement a growth strategy that minimizes reallocations:\n```rust\nlet needed = (grid_cols as usize) * (grid_rows as usize);\nif needed <= self.cell_capacity {\n    return Ok(());\n}\n// Grow by at least 50% to reduce frequent reallocations\nlet new_capacity = (needed * 3 / 2).max(self.cell_capacity * 2);\nself.cell_buffer = Self::alloc_cell_buffer(&self.device, new_capacity)?;\nself.cell_capacity = new_capacity;\n```",
+    "file_path": "src/gpu/context.rs`, lines 154-163"
+  },
+  {
+    "finding_id": "e18d9a538ce935da",
+    "model_key": "qwen3-coder",
+    "severity": null,
+    "summary": "🧪 TESTING GAPS",
+    "body": "#### 10. **Missing Edge Case Tests for Scrollback**\n**Issue:** The scrollback buffer implementation has complex logic for ring buffer management, but lacks comprehensive tests for edge cases like:\n- Buffer wraparound behavior\n- Access patterns when buffer is partially full\n- Behavior at capacity limits\n\n**Fix:** Add comprehensive tests for `ScrollbackBuffer` covering:\n```rust\n#[test]\nfn test_scrollback_wraparound() {\n    let mut buf = ScrollbackBuffer::new(3);\n    buf.push(Row::new(10));\n    buf.push(Row::new(10));\n    buf.push(Row::new(10));\n    // This should overwrite the first row\n    buf.push(Row::new(10));\n    \n    assert_eq!(buf.len(), 3);\n    // Verify the correct row was overwritten\n}\n```"
+  },
+  {
+    "finding_id": "3ea1aa7860462657",
+    "model_key": "qwen3-coder",
+    "severity": null,
+    "summary": "Missing Edge Case Tests for Scrollback",
+    "body": "**Issue:** The scrollback buffer implementation has complex logic for ring buffer management, but lacks comprehensive tests for edge cases like:\n- Buffer wraparound behavior\n- Access patterns when buffer is partially full\n- Behavior at capacity limits\n\n**Fix:** Add comprehensive tests for `ScrollbackBuffer` covering:\n```rust\n#[test]\nfn test_scrollback_wraparound() {\n    let mut buf = ScrollbackBuffer::new(3);\n    buf.push(Row::new(10));\n    buf.push(Row::new(10));\n    buf.push(Row::new(10));\n    // This should overwrite the first row\n    buf.push(Row::new(10));\n    \n    assert_eq!(buf.len(), 3);\n    // Verify the correct row was overwritten\n}\n```"
+  },
+  {
+    "finding_id": "29c38e91001aa564",
+    "model_key": "qwen3-coder",
+    "severity": null,
+    "summary": "Summary of Findings",
+    "body": "| Severity | Issue | File | Lines |\n|----------|-------|------|-------|\n| 🔥 CRITICAL | Use-after-free in titlebar appearance | `src/titlebar.rs` | 26-30 |\n| 🔥 CRITICAL | Potential memory leak in window creation | `src/gpu/window.rs` | 38-43 |\n| ⚠️ HIGH | Race condition in grid access | `src/app.rs` | 499-502 |\n| ⚠️ HIGH | Incorrect scroll offset calculation | `src/grid/storage.rs` | 234-246 |\n| ⚠️ MEDIUM | Sidebar resize jank | `src/app.rs` | 1403-1415 |\n| ⚠️ MEDIUM | Inconsistent tab switching behavior | `src/app.rs` | 1278-1289 |\n| ⚠️ MEDIUM | Color contrast issues in sidebar | `src/sidebar/layout.rs` | 12-21 |\n| ⚠️ MEDIUM | Inconsistent padding in sidebar cards | `src/sidebar/layout.rs` | 24-27 |\n| 🔧 PERFORMANCE | Excessive GPU buffer resizing | `src/gpu/context.rs` | 154-163 |\n| 🧪 TESTING | Missing scrollback edge case tests | Multiple | N/A |\n\nThe most critical issues are the safety problems in the Objective-C interop code, which could lead to crashes or memory corruption. The correctness issues with scrollback and grid access could lead to data corruption or panics. The UX issues, while not critical, impact the overall user experience and should be addressed for a polished product."
+  },
+  {
+    "finding_id": "58488a90838b705c",
+    "model_key": "deepseek-v3.1",
+    "severity": null,
+    "summary": "Critical Safety Issues",
+    "body": "#### **titlebar.rs - Unsafe Objective-C Calls**\n- **Line 16**: `let ns_window: *const AnyObject = msg_send![ns_view, window];`\n  - The returned `ns_window` pointer is not checked for null until line 17, but if it is null, the function returns early. However, line 20 dereferences it with `let ns_window = &*ns_window;` **without checking if it's null again**. This is a use-after-null-deref bug.\n  - **Confidence**: High (direct null dereference risk).\n\n- **Line 26-27**: `let appearance: *const AnyObject = msg_send![appearance_class, appearanceNamed: &*appearance_name];`\n  - The `appearance` pointer is checked for null at line 28, but if it is null, the function continues to line 34 (`setTitlebarAppearsTransparent`) and 45 (`setBackgroundColor`). These messages are sent to a potentially null window, which is undefined behavior.\n  - **Confidence**: High (Objective-C messages to null receiver).\n\n#### **gpu/window.rs - Unsafe Layer Creation**\n- **Line 39**: `let layer_ptr: *mut CAMetalLayer = raw_layer.into_raw().as_ptr().cast();`\n  - `into_raw()` consumes the `raw_layer`, but then `as_ptr()` is called on the consumed value. This is likely a use-after-move bug.\n  - **Confidence**: High (memory safety violation).\n\n- **Line 40-43**: `Retained::from_raw(layer_ptr)` may fail if `layer_ptr` is null, but the error handling only checks for null. There's no guarantee that `layer_ptr` is a valid `CAMetalLayer` instance.\n  - **Confidence**: Medium (invalid pointer conversion).\n\n#### **app.rs - Race Conditions**\n- **Line 347-350**: `drain_pollers` iterates over `self.windows` to build requests, but the `windows` vector can be modified concurrently (e.g., by `window_event` closing a window). This can lead to use-after-free or index out-of-bounds.\n  - **Confidence**: High (race condition in shared state).\n\n- **Line 394-405**: Similar race condition: iterating over `self.windows` while they might be removed by another event.\n  - **Confidence**: High."
+  },
+  {
+    "finding_id": "b85735bc30c9c1d9",
+    "model_key": "deepseek-v3.1",
+    "severity": null,
+    "summary": "titlebar.rs - Unsafe Objective-C Calls",
+    "body": "- **Line 16**: `let ns_window: *const AnyObject = msg_send![ns_view, window];`\n  - The returned `ns_window` pointer is not checked for null until line 17, but if it is null, the function returns early. However, line 20 dereferences it with `let ns_window = &*ns_window;` **without checking if it's null again**. This is a use-after-null-deref bug.\n  - **Confidence**: High (direct null dereference risk).\n\n- **Line 26-27**: `let appearance: *const AnyObject = msg_send![appearance_class, appearanceNamed: &*appearance_name];`\n  - The `appearance` pointer is checked for null at line 28, but if it is null, the function continues to line 34 (`setTitlebarAppearsTransparent`) and 45 (`setBackgroundColor`). These messages are sent to a potentially null window, which is undefined behavior.\n  - **Confidence**: High (Objective-C messages to null receiver)."
+  },
+  {
+    "finding_id": "b6e3050bfa9fd595",
+    "model_key": "deepseek-v3.1",
+    "severity": null,
+    "summary": "gpu/window.rs - Unsafe Layer Creation",
+    "body": "- **Line 39**: `let layer_ptr: *mut CAMetalLayer = raw_layer.into_raw().as_ptr().cast();`\n  - `into_raw()` consumes the `raw_layer`, but then `as_ptr()` is called on the consumed value. This is likely a use-after-move bug.\n  - **Confidence**: High (memory safety violation).\n\n- **Line 40-43**: `Retained::from_raw(layer_ptr)` may fail if `layer_ptr` is null, but the error handling only checks for null. There's no guarantee that `layer_ptr` is a valid `CAMetalLayer` instance.\n  - **Confidence**: Medium (invalid pointer conversion)."
+  },
+  {
+    "finding_id": "a6a54f23b3082ced",
+    "model_key": "deepseek-v3.1",
+    "severity": null,
+    "summary": "app.rs - Race Conditions",
+    "body": "- **Line 347-350**: `drain_pollers` iterates over `self.windows` to build requests, but the `windows` vector can be modified concurrently (e.g., by `window_event` closing a window). This can lead to use-after-free or index out-of-bounds.\n  - **Confidence**: High (race condition in shared state).\n\n- **Line 394-405**: Similar race condition: iterating over `self.windows` while they might be removed by another event.\n  - **Confidence**: High."
+  },
+  {
+    "finding_id": "08cda8aba326121d",
+    "model_key": "deepseek-v3.1",
+    "severity": null,
+    "summary": "Logic Errors and Off-by-One Bugs",
+    "body": "#### **grid/storage.rs - Scrollback Buffer Indexing**\n- **Line 56**: `let real_idx = (start + index) % self.capacity;`\n  - When the buffer is full and wrapped, `start` is `self.head % capacity`, but `head` can be larger than `capacity`. The modulo operation is correct, but the index calculation might not account for the ring buffer correctly if `head` wraps around multiple times.\n  - **Confidence**: Medium (indexing logic may be flawed).\n\n- **Line 229**: `cell_scrolled` function: \n  - `let sb_start = sb_len.saturating_sub(scroll_offset);`\n  - If `scroll_offset > sb_len`, `sb_start` becomes 0, but `sb_row_idx = 0 + row` might be out of bounds for the scrollback buffer.\n  - **Confidence**: Medium (off-by-one risk).\n\n#### **vt/handler.rs - Cursor Position Clamping**\n- **Line 439**: `self.state.cursor.row = self.state.cursor.row.saturating_sub(n);`\n  - This can underflow to 0, but should be clamped to at least 0. The `saturating_sub` is correct, but the cursor might go below 0? (No, because `u16`). However, if `n` is large, it might clamp to 0, which is correct.\n  - **Confidence**: Low (seems correct).\n\n- **Line 446**: `self.state.cursor.row = self.state.cursor.row.saturating_add(n).min(max_row);`\n  - This is correct.\n\n#### **pixel_to_grid Function (app.rs)**\n- **Line 158-167**: \n  - `let col = (lx / cell_w).max(0.0) as usize;`\n  - `let row = (ly / cell_h).max(0.0) as usize;`\n  - Then clamped to `row.min(rows.saturating_sub(1) as usize)` and `col.min(cols.saturating_sub(1) as usize)`.\n  - This is correct for clamping, but note: `rows` and `cols` are `u16`, and `saturating_sub(1)` prevents underflow. However, if `rows` or `cols` is 0, `saturating_sub(1)` returns 0, and `min(0)` will be 0. So it handles 0 rows/cols.\n  - **Confidence**: Low (seems correct)."
+  },
+  {
+    "finding_id": "45a7034c5f5b0505",
+    "model_key": "deepseek-v3.1",
+    "severity": null,
+    "summary": "grid/storage.rs - Scrollback Buffer Indexing",
+    "body": "- **Line 56**: `let real_idx = (start + index) % self.capacity;`\n  - When the buffer is full and wrapped, `start` is `self.head % capacity`, but `head` can be larger than `capacity`. The modulo operation is correct, but the index calculation might not account for the ring buffer correctly if `head` wraps around multiple times.\n  - **Confidence**: Medium (indexing logic may be flawed).\n\n- **Line 229**: `cell_scrolled` function: \n  - `let sb_start = sb_len.saturating_sub(scroll_offset);`\n  - If `scroll_offset > sb_len`, `sb_start` becomes 0, but `sb_row_idx = 0 + row` might be out of bounds for the scrollback buffer.\n  - **Confidence**: Medium (off-by-one risk)."
+  },
+  {
+    "finding_id": "12fb9ca28aa8d9be",
+    "model_key": "deepseek-v3.1",
+    "severity": null,
+    "summary": "vt/handler.rs - Cursor Position Clamping",
+    "body": "- **Line 439**: `self.state.cursor.row = self.state.cursor.row.saturating_sub(n);`\n  - This can underflow to 0, but should be clamped to at least 0. The `saturating_sub` is correct, but the cursor might go below 0? (No, because `u16`). However, if `n` is large, it might clamp to 0, which is correct.\n  - **Confidence**: Low (seems correct).\n\n- **Line 446**: `self.state.cursor.row = self.state.cursor.row.saturating_add(n).min(max_row);`\n  - This is correct."
+  },
+  {
+    "finding_id": "739c0e26259523b6",
+    "model_key": "deepseek-v3.1",
+    "severity": null,
+    "summary": "pixel_to_grid Function (app.rs)",
+    "body": "- **Line 158-167**: \n  - `let col = (lx / cell_w).max(0.0) as usize;`\n  - `let row = (ly / cell_h).max(0.0) as usize;`\n  - Then clamped to `row.min(rows.saturating_sub(1) as usize)` and `col.min(cols.saturating_sub(1) as usize)`.\n  - This is correct for clamping, but note: `rows` and `cols` are `u16`, and `saturating_sub(1)` prevents underflow. However, if `rows` or `cols` is 0, `saturating_sub(1)` returns 0, and `min(0)` will be 0. So it handles 0 rows/cols.\n  - **Confidence**: Low (seems correct)."
+  },
+  {
+    "finding_id": "4cba42575d8bdc3e",
+    "model_key": "deepseek-v3.1",
+    "severity": null,
+    "summary": "Error Handling Issues",
+    "body": "#### **Silent Error Swallowing**\n- **app.rs, Line 102**: `fn write_pty(&self, data: &[u8]) { let _ = self.pty.write(data); }`\n  - The result of `write` is ignored. This could silently fail if the PTY is closed.\n  - **Confidence**: High (error ignored).\n\n- **pty/reader.rs, Line 134**: `Err(e) => { if total > 0 { break; } return Err(...); }`\n  - On error, if some data was read, it breaks and returns the partial data. But the error is not propagated. This might be intentional (return partial data), but the error is lost.\n  - **Confidence**: Medium (error handling policy).\n\n- **Many places**: Error results from `msg_send!` are often ignored (e.g., `let _: () = msg_send![...]`). This is common in Objective-C interop, but failures are silent.\n  - **Confidence**: Medium (Objective-C convention).\n\n#### **PTY Reader Overflow Handling**\n- **pty/reader.rs, Line 60-68**: Overflow buffer is served first, but if the overflow buffer is non-empty, it returns a chunk without polling. This might starve new data if the overflow is large.\n  - **Confidence**: Low (design choice)."
+  },
+  {
+    "finding_id": "afab9150bc4853fc",
+    "model_key": "deepseek-v3.1",
+    "severity": null,
+    "summary": "Silent Error Swallowing",
+    "body": "- **app.rs, Line 102**: `fn write_pty(&self, data: &[u8]) { let _ = self.pty.write(data); }`\n  - The result of `write` is ignored. This could silently fail if the PTY is closed.\n  - **Confidence**: High (error ignored).\n\n- **pty/reader.rs, Line 134**: `Err(e) => { if total > 0 { break; } return Err(...); }`\n  - On error, if some data was read, it breaks and returns the partial data. But the error is not propagated. This might be intentional (return partial data), but the error is lost.\n  - **Confidence**: Medium (error handling policy).\n\n- **Many places**: Error results from `msg_send!` are often ignored (e.g., `let _: () = msg_send![...]`). This is common in Objective-C interop, but failures are silent.\n  - **Confidence**: Medium (Objective-C convention)."
+  },
+  {
+    "finding_id": "50b25f4165a28914",
+    "model_key": "deepseek-v3.1",
+    "severity": null,
+    "summary": "PTY Reader Overflow Handling",
+    "body": "- **pty/reader.rs, Line 60-68**: Overflow buffer is served first, but if the overflow buffer is non-empty, it returns a chunk without polling. This might starve new data if the overflow is large.\n  - **Confidence**: Low (design choice)."
+  },
+  {
+    "finding_id": "3dbea91779380fcf",
+    "model_key": "deepseek-v3.1",
+    "severity": null,
+    "summary": "UX and Visual Consistency",
+    "body": "#### **Sidebar Rendering (sidebar/layout.rs)**\n- **Line 30**: `fn content_width(cols: u16) -> u16 { cols.saturating_sub(PAD_LEFT + PAD_RIGHT) }`\n  - If `cols < PAD_LEFT + PAD_RIGHT`, this returns 0, which might cause division by zero elsewhere? (Not directly, but could lead to empty rendering.)\n  - **Confidence**: Low (defensive).\n\n- **Line 426**: `write_str` function: \n  - Iterates over `text.chars()` and writes to `cells`. If `text` has multi-width characters (e.g., emoji), it might overflow the column. No handling for character width.\n  - **Confidence**: Medium (UTF-8 width not considered).\n\n#### **Color Consistency**\n- **config.rs**: Solarized Dark colors are defined, but in `sidebar/layout.rs`, there are hardcoded colors (e.g., `SIDEBAR_BG`, `CARD_BG`). These are not using the theme colors, so they might not match.\n  - **Confidence**: High (inconsistency)."
+  },
+  {
+    "finding_id": "e58ca88824057b33",
+    "model_key": "deepseek-v3.1",
+    "severity": null,
+    "summary": "Sidebar Rendering (sidebar/layout.rs)",
+    "body": "- **Line 30**: `fn content_width(cols: u16) -> u16 { cols.saturating_sub(PAD_LEFT + PAD_RIGHT) }`\n  - If `cols < PAD_LEFT + PAD_RIGHT`, this returns 0, which might cause division by zero elsewhere? (Not directly, but could lead to empty rendering.)\n  - **Confidence**: Low (defensive).\n\n- **Line 426**: `write_str` function: \n  - Iterates over `text.chars()` and writes to `cells`. If `text` has multi-width characters (e.g., emoji), it might overflow the column. No handling for character width.\n  - **Confidence**: Medium (UTF-8 width not considered)."
+  },
+  {
+    "finding_id": "775e4f4887163f62",
+    "model_key": "deepseek-v3.1",
+    "severity": null,
+    "summary": "Color Consistency",
+    "body": "- **config.rs**: Solarized Dark colors are defined, but in `sidebar/layout.rs`, there are hardcoded colors (e.g., `SIDEBAR_BG`, `CARD_BG`). These are not using the theme colors, so they might not match.\n  - **Confidence**: High (inconsistency)."
+  },
+  {
+    "finding_id": "342b813a7534f280",
+    "model_key": "deepseek-v3.1",
+    "severity": null,
+    "summary": "Performance Issues",
+    "body": "#### **Glyph Atlas (gpu/atlas.rs)**\n- **Line 542**: `get_or_insert` uses a `HashMap` cache, but the `rasterize_glyph` and `upload_to_texture` are called every time for cache misses. This might be slow for non-ASCII characters.\n  - **Confidence**: Low (expected behavior).\n\n#### **Grid Resize (grid/storage.rs)**\n- **Line 193**: `resize` function: \n  - If `new_rows < self.visible_rows`, it drains the excess rows and pushes to scrollback. This is O(n) and might be slow for large scrollbacks.\n  - **Confidence**: Low (necessary)."
+  },
+  {
+    "finding_id": "b727eb46471f97ff",
+    "model_key": "deepseek-v3.1",
+    "severity": null,
+    "summary": "Glyph Atlas (gpu/atlas.rs)",
+    "body": "- **Line 542**: `get_or_insert` uses a `HashMap` cache, but the `rasterize_glyph` and `upload_to_texture` are called every time for cache misses. This might be slow for non-ASCII characters.\n  - **Confidence**: Low (expected behavior)."
+  },
+  {
+    "finding_id": "c5b9db51a58c13ca",
+    "model_key": "deepseek-v3.1",
+    "severity": null,
+    "summary": "Grid Resize (grid/storage.rs)",
+    "body": "- **Line 193**: `resize` function: \n  - If `new_rows < self.visible_rows`, it drains the excess rows and pushes to scrollback. This is O(n) and might be slow for large scrollbacks.\n  - **Confidence**: Low (necessary)."
+  },
+  {
+    "finding_id": "9cd202d69da4a116",
+    "model_key": "deepseek-v3.1",
+    "severity": null,
+    "summary": "Other Notable Issues",
+    "body": "#### **VT Parser State (vt/handler.rs)**\n- **Line 40**: `put_char` uses `pending_wrap` for delayed wrap. This is correct, but the state machine is complex.\n  - **Confidence**: Low (seems correct).\n\n#### **Clipboard Handling (app.rs)**\n- **Line 856**: `clipboard_text` returns `None` on failure, but `set_clipboard_text` (line 879) returns `()` on failure. Errors are silent.\n  - **Confidence**: Medium (error ignored)."
+  },
+  {
+    "finding_id": "f44fc149c9276933",
+    "model_key": "deepseek-v3.1",
+    "severity": null,
+    "summary": "VT Parser State (vt/handler.rs)",
+    "body": "- **Line 40**: `put_char` uses `pending_wrap` for delayed wrap. This is correct, but the state machine is complex.\n  - **Confidence**: Low (seems correct)."
+  },
+  {
+    "finding_id": "248b17ee9876dcc8",
+    "model_key": "deepseek-v3.1",
+    "severity": null,
+    "summary": "Clipboard Handling (app.rs)",
+    "body": "- **Line 856**: `clipboard_text` returns `None` on failure, but `set_clipboard_text` (line 879) returns `()` on failure. Errors are silent.\n  - **Confidence**: Medium (error ignored)."
+  },
+  {
+    "finding_id": "48fac9bc43561ddf",
+    "model_key": "deepseek-v3.1",
+    "severity": null,
+    "summary": "Summary of Critical Issues:",
+    "body": "1. **Null dereference in `titlebar.rs`** (line 20) - must check `ns_window` null after early return.\n2. **Objective-C messages to null receiver** in `titlebar.rs` (lines 34 and 45) - should skip if `appearance` is null.\n3. **Use-after-move in `gpu/window.rs`** (line 39) - `raw_layer.into_raw().as_ptr()` is invalid.\n4. **Race conditions in `app.rs`** (multiple places) - `windows` vector accessed without locking.\n5. **Error ignored in PTY write** (`app.rs` line 102) - should at least log errors.\n\n**Recommendations**:\n- Add null checks after early returns in `titlebar.rs`.\n- Use `NonNull` or similar for Objective-C pointers to avoid null derefs.\n- Use `Arc<Mutex<Vec>>` for `windows` in `App` to prevent races.\n- Propagate or log errors instead of ignoring them.\n- Ensure sidebar colors match the theme.\n\n**Confidence Level**: High for safety issues, medium for logic errors, low for performance/UX issues."
+  },
+  {
+    "finding_id": "b6f7d5ae409c4a6b",
+    "model_key": "gemini",
+    "severity": null,
+    "summary": "SAFETY: Objective-C Memory Management (Crash Hazard)",
+    "body": "**File:** `src/titlebar.rs` (Lines 37-45)\n**Issue:** Over-release leading to Use-After-Free / Double Free.\n\nYou are using the `msg_send!` macro to call `colorWithSRGBRed:` and capturing the result into an `objc2::rc::Retained<AnyObject>`. \n\nUnder Objective-C ARC rules, methods that do not start with `alloc`, `new`, `copy`, or `mutableCopy` return **autoreleased (+0)** objects. The `Retained<T>` wrapper represents owned (+1) semantics. When `bg` goes out of scope, `Retained` will call `release` on it. The autorelease pool will subsequently drain and attempt to release it *again*, causing a fatal double-free crash.\n\n**Proof of Fix:**\n```rust\n// Incorrect (+1 wrapper around +0 object):\nlet bg: Retained<AnyObject> = msg_send![ns_color_class, colorWithSRGBRed: ...];\n\n// Correct (Raw pointer for +0 object, or use objc2's msg_send_id!):\nlet bg: *mut AnyObject = msg_send![ns_color_class, colorWithSRGBRed: 0.0_f64 ...];\nlet _: () = msg_send![ns_window, setBackgroundColor: bg];\n```\n*(A secondary minor leak exists in `app.rs` `setup_macos_window_menu` where `alloc`/`init` +1 objects are never released, permanently leaking the menu container allocations).*",
+    "file_path": "src/titlebar.rs` (Lines 37-45)"
+  },
+  {
+    "finding_id": "11e48355b8294eef",
+    "model_key": "gemini",
+    "severity": null,
+    "summary": "CORRECTNESS: PTY Data Corruption (Silent Truncation)",
+    "body": "**File:** `src/app.rs` (Line 101) & `src/pty/spawn.rs` (Line 199)\n**Issue:** Silent dropping of outbound data on PTY `EAGAIN`.\n\nThe PTY master file descriptor is set to non-blocking (`spawn.rs:159`). If a user pastes a large block of text (e.g., Cmd+V a JSON blob), `tw.write_pty(bytes)` delegates to `nix::unistd::write`. Non-blocking FDs will return `ErrorKind::WouldBlock` (`EAGAIN`) once the kernel buffer is full (typically ~64KB). \n\nBecause `app.rs` completely ignores the `Result` of `tw.pty.write()`, any data that exceeds the kernel buffer is **permanently and silently truncated**, corrupting user input.\n\n**Fix:** You must introduce an outbound `Vec<u8>` buffer for each `TerminalWindow`. When writing, append to the buffer, attempt to drain it, and if `EAGAIN` is hit, register the PTY fd with `mio` for `Interest::WRITABLE` to resume draining on the next event loop tick.",
+    "file_path": "src/app.rs` (Line 101) & `src/pty/spawn.rs` (Line 199)"
+  },
+  {
+    "finding_id": "0efead7bc1b1b8ad",
+    "model_key": "gemini",
+    "severity": null,
+    "summary": "CORRECTNESS: Metal CPU/GPU Race Condition (Screen Tearing)",
+    "body": "**File:** `src/gpu/context.rs` & `src/app.rs` (Line 578)\n**Issue:** Writing to an active Metal buffer.\n\nYou allocate a single `cell_buffer` with `MTLStorageMode::Shared`. In `app.rs`, you iterate over `dirty_mask` and write directly to this mapped CPU memory (`cell_ptr.add(offset).write(gpu_cell)`). \n\nBecause Winit does not inherently block the CPU until the GPU finishes executing the command buffer, the CPU will frequently begin mutating the grid cells for Frame *N+1* while the GPU is still rasterizing Frame *N*. This causes severe screen tearing and flickering where halves of different characters are rendered in the same frame.\n\n**Fix:** Standard Metal practice requires a **ring buffer** (typically triple-buffering). You need `[Retained<MTLBuffer>; 3]`, cycling through them each frame, ensuring the CPU only mutates a buffer that the GPU has finished reading.",
+    "file_path": "src/gpu/context.rs` & `src/app.rs` (Line 578)"
+  },
+  {
+    "finding_id": "b64de650d2ccd878",
+    "model_key": "gemini",
+    "severity": null,
+    "summary": "UX QUALITY: Process Discovery Fails on macOS",
+    "body": "**File:** `src/sidebar/discovery/tab_session.rs` (Line 25)\n**Issue:** Sidebar will be completely empty for `claude-code` users.\n\nYou attempt to find the Claude session via `pgrep -P <pid> -x claude`. `claude-code` is an NPM package containing a bin script (`#!/usr/bin/env node`). On macOS, the kernel registers the process name as `node`, not `claude`. `pgrep -x claude` demands an exact executable name match and will silently return `None` forever.\n\n**Fix:** Match the full command line argument instead of the executable name.\n```rust\nCommand::new(\"pgrep\").args([\"-P\", &shell_pid.to_string(), \"-f\", \"claude\"]).output()\n```",
+    "file_path": "src/sidebar/discovery/tab_session.rs` (Line 25)"
+  },
+  {
+    "finding_id": "caa42992987f7a39",
+    "model_key": "gemini",
+    "severity": null,
+    "summary": "PERFORMANCE: Artificial Throughput Bottleneck",
+    "body": "**File:** `src/pty/reader.rs` (Line 15)\n**Issue:** PTY Read Cap is extremely low.\n\n`MAX_BYTES_PER_FRAME` is set to `16 * 1024` (16KB). Because your Winit loop runs at 60 FPS maximum, your terminal's absolute maximum parsing throughput is **~960 KB/second**. Modern terminals handle 50MB/s – 200MB/s. If a user runs `cat` on a large file or compiles a large Rust project, the child process will block waiting for `claude-cockpit` to drain stdout, causing the terminal to crawl artificially.\n\n**Fix:** Increase `MAX_BYTES_PER_FRAME` to at least `256 * 1024` or dynamically adapt the chunk size based on how much time the Winit frame has left to maintain 60 FPS.",
+    "file_path": "src/pty/reader.rs` (Line 15)"
+  },
+  {
+    "finding_id": "15171d1f6fbc70f0",
+    "model_key": "gemini",
+    "severity": null,
+    "summary": "PERFORMANCE: Infinite 60 FPS Busy Loop (Battery Drain)",
+    "body": "**File:** `src/app.rs` (Lines 1678, 1750) & `src/event_policy.rs`\n**Issue:** The app never sleeps.\n\nBecause `mio::Poll` is isolated and not integrated into Winit's event loop via an `EventLoopProxy` waker, `app.rs` resorts to setting `ControlFlow::WaitUntil(Instant::now() + 16ms)` when the PTY is idle. This forces Winit to wake up 60 times a second, lock memory, render, and go back to sleep. This will absolutely shred laptop batteries.\n\n**Fix:** A terminal should use `ControlFlow::Wait` when idle. To wake up when PTY data arrives, run `PtyReader::poll_read` inside a dedicated background Tokio task. When `mio` wakes up with readable data, send a custom Winit user event via `EventLoopProxy::send_event` to wake Winit instantly.",
+    "file_path": "src/app.rs` (Lines 1678, 1750) & `src/event_policy.rs"
+  },
+  {
+    "finding_id": "7b4dfcb16340b4d9",
+    "model_key": "gemini",
+    "severity": null,
+    "summary": "SAFETY: File Descriptor Leaks via Fork",
+    "body": "**File:** `src/pty/spawn.rs` (Line 106)\n**Issue:** Child process inherits all GUI sockets/handles.\n\n`openpty()` on macOS does not automatically set `O_CLOEXEC`. When `fork()` and `execvp()` are called, the spawned shell (and Claude) inherits Winit's window sockets, Metal device descriptors, and `mio` kqueue descriptors. If `claude-cockpit` crashes or restarts, these leaked descriptors will be kept alive by the background shell processes, causing system resource exhaustion.\n\n**Fix:** Iterate through `3..1024` and manually `libc::close(fd)` immediately after the `fork()` inside the child branch, before calling `execvp`.",
+    "file_path": "src/pty/spawn.rs` (Line 106)"
+  },
+  {
+    "finding_id": "6a67ee0f6df6c92d",
+    "model_key": "gemini",
+    "severity": null,
+    "summary": "The `Arc<RwLock<Grid>>` Concurrency Status",
+    "body": "You requested proof of deadlocks/races here. **Proof of non-existence:** \nThe `SharedGrid` is instantiated in `app.rs:290`. I verified that it is strictly accessed on Winit's main thread inside `render_window`, `poll_pty`, `resize`, and `extract_selection_text`. It is never cloned and sent to the Tokio tasks (which only handle sidebar HTTP/Process polling). Therefore, despite being wrapped in an `RwLock`, access is effectively sequential. There are no data races or deadlocks possible here in the current architecture."
+  }
+]

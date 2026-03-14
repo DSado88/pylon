@@ -1,5 +1,5 @@
 [package]
-name = "claude-cockpit"
+name = "pylon"
 version = "0.1.0"
 edition = "2021"
 description = "Metal-accelerated terminal emulator with native Claude Code integration"

@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Claude Cockpit</string>
+    <string>Pylon</string>
     <key>CFBundleDisplayName</key>
-    <string>Claude Cockpit</string>
+    <string>Pylon</string>
     <key>CFBundleIdentifier</key>
-    <string>com.cockpit.claude-cockpit</string>
+    <string>com.pylon.terminal</string>
     <key>CFBundleVersion</key>
     <string>0.1.0</string>
     <key>CFBundleShortVersionString</key>
     <string>0.1.0</string>
     <key>CFBundleExecutable</key>
-    <string>claude-cockpit</string>
+    <string>pylon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>

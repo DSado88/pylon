@@ -31,7 +31,7 @@ use crate::vt::state::TerminalState;
 
 const DEFAULT_COLS: u16 = 120;
 const DEFAULT_ROWS: u16 = 40;
-const TABBING_ID: &str = "cockpit-terminal";
+const TABBING_ID: &str = "pylon-terminal";
 
 /// Per-window terminal state. Each native macOS tab is a window with its own
 /// renderer, PTY, grid, and VT parser.
@@ -289,7 +289,7 @@ impl App {
         event_loop: &ActiveEventLoop,
     ) -> Result<(WindowId, TerminalWindow)> {
         let attrs = WindowAttributes::default()
-            .with_title("Claude Cockpit")
+            .with_title("Pylon")
             .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 800.0))
             .with_tabbing_identifier(TABBING_ID);
 

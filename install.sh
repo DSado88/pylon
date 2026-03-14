@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 cargo build --release
-cp target/release/claude-cockpit "Claude Cockpit.app/Contents/MacOS/claude-cockpit"
-cp -r "Claude Cockpit.app" /Applications/
-echo "Installed Claude Cockpit.app to /Applications"
+mkdir -p "Pylon.app/Contents/MacOS"
+cp "Claude Cockpit.app/Contents/Info.plist" "Pylon.app/Contents/"
+cp target/release/pylon "Pylon.app/Contents/MacOS/pylon"
+# Remove old app if present
+rm -rf "/Applications/Claude Cockpit.app"
+cp -r "Pylon.app" /Applications/
+echo "Installed Pylon.app to /Applications"
